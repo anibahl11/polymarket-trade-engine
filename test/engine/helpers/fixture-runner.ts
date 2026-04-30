@@ -103,6 +103,11 @@ export class FixtureRunner {
   async setup(strategy: Strategy): Promise<void> {
     // Suppress simClient network delay so lifecycle ticks are fast
     process.env.SIM_DELAY_MS = "0";
+    // Disable safety-overlay gates by default so fixtures test original behavior.
+    // Individual tests for these gates set their own values.
+    process.env.MAX_POSITION_PCT = "0";
+    process.env.MAX_DRAWDOWN_PCT = "0";
+    process.env.DAILY_LOSS_LIMIT = "0";
 
     this.clock = sinon.useFakeTimers({
       now: LOG_START_TS,
@@ -192,6 +197,9 @@ export class FixtureRunner {
   /** Restore sinon clock and destroy the lifecycle. */
   teardown(): void {
     delete process.env.SIM_DELAY_MS;
+    delete process.env.MAX_POSITION_PCT;
+    delete process.env.MAX_DRAWDOWN_PCT;
+    delete process.env.DAILY_LOSS_LIMIT;
     this.lifecycle?.destroy();
     this.clock?.restore();
   }

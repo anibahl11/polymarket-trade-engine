@@ -2,7 +2,12 @@ import { APIQueue } from "../tracker/api-queue.ts";
 import type { EarlyBirdClient } from "./client.ts";
 import { EarlyBirdSimClient, PolymarketEarlyBirdClient } from "./client.ts";
 import { MarketLifecycle } from "./market-lifecycle.ts";
-import { loadState, saveState, type CompletedMarketState } from "./state.ts";
+import {
+  loadState,
+  saveState,
+  type CompletedMarketState,
+  type DailyLossState,
+} from "./state.ts";
 import { getSlug } from "../utils/slot.ts";
 import { log } from "./log.ts";
 import { recover } from "./recovery.ts";
@@ -14,6 +19,7 @@ import {
 import { WalletTracker } from "./wallet-tracker.ts";
 import { TickerTracker } from "../tracker/ticker";
 import { Env } from "../utils/config.ts";
+import { modeTag, safetyLog, utcDate } from "./safety.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -39,6 +45,8 @@ export class EarlyBird {
   private _roundsCreated = 0;
   private _tracker!: WalletTracker;
   private _ticker = new TickerTracker();
+  private _initialBalance = 0;
+  private _daily: DailyLossState = { date: utcDate(), lossToday: 0 };
 
   constructor(
     strategyName?: string,
@@ -100,6 +108,7 @@ export class EarlyBird {
       initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
       log.write(`[startup] Sim balance: $${initialBalance.toFixed(2)}`);
     }
+    this._initialBalance = initialBalance;
     this._tracker = new WalletTracker(initialBalance, (msg) =>
       log.write(msg, "dim"),
     );
@@ -107,12 +116,43 @@ export class EarlyBird {
     log.write(
       `[startup] Min session PnL exit: $${this._minSessionPnl.toFixed(2)}`,
     );
+    log.write(
+      `[startup] Risk gates: MAX_POSITION_PCT=${(Env.get("MAX_POSITION_PCT") * 100).toFixed(2)}% ` +
+        `MAX_DRAWDOWN_PCT=${(Env.get("MAX_DRAWDOWN_PCT") * 100).toFixed(2)}% ` +
+        `DAILY_LOSS_LIMIT=$${Env.get("DAILY_LOSS_LIMIT").toFixed(2)}`,
+    );
 
     const state = loadState(this._statePath);
     if (state) {
       log.write(`[startup] Loading state from ${this._statePath}`);
       this._sessionPnl = state.sessionPnl;
       this._sessionLoss = state.sessionLoss ?? 0;
+
+      // Hydrate daily-loss bucket; reset if persisted date is not today.
+      const today = utcDate();
+      if (state.daily && state.daily.date === today) {
+        this._daily = { date: today, lossToday: state.daily.lossToday };
+      } else {
+        this._daily = { date: today, lossToday: 0 };
+      }
+
+      const dailyLimit = Env.get("DAILY_LOSS_LIMIT");
+      if (
+        dailyLimit > 0 &&
+        Math.abs(this._daily.lossToday) >= dailyLimit
+      ) {
+        log.write(
+          `[startup] Daily loss for ${this._daily.date} ($${this._daily.lossToday.toFixed(2)}) already meets or exceeds DAILY_LOSS_LIMIT ($${dailyLimit.toFixed(2)}). ` +
+            `Wait until UTC midnight, raise DAILY_LOSS_LIMIT, or reset "daily" in ${this._statePath}.`,
+          "red",
+        );
+        safetyLog("shutdown", "DAILY_LOSS_LIMIT_AT_STARTUP", {
+          date: this._daily.date,
+          lossToday: this._daily.lossToday,
+          limit: dailyLimit,
+        });
+        process.exit(1);
+      }
 
       if (Math.abs(this._sessionLoss) >= this._minSessionPnl) {
         log.write(
@@ -214,11 +254,27 @@ export class EarlyBird {
         this._sessionLoss = parseFloat(
           (this._sessionLoss + lifecycle.pnl).toFixed(4),
         );
+        // Roll into the daily bucket; reset if UTC date rolled over mid-run.
+        const today = utcDate();
+        if (this._daily.date !== today) {
+          this._daily = { date: today, lossToday: 0 };
+        }
+        this._daily.lossToday = parseFloat(
+          (this._daily.lossToday + lifecycle.pnl).toFixed(4),
+        );
       }
       log.write(
         `[${slug}] Session PnL: ${this._sessionPnl >= 0 ? "+" : ""}$${this._sessionPnl.toFixed(2)}`,
         this._sessionPnl >= 0 ? "green" : "red",
       );
+      safetyLog(modeTag(), "marketResolved", {
+        slug,
+        pnl: lifecycle.pnl,
+        sessionPnl: this._sessionPnl,
+        sessionLoss: this._sessionLoss,
+        balance: this._tracker.balance,
+        dailyLoss: this._daily.lossToday,
+      });
       this._completedMarkets.push({
         slug,
         strategyName: lifecycle.strategyName,
@@ -230,8 +286,49 @@ export class EarlyBird {
       this._completedSlugs.add(slug);
 
       if (Math.abs(this._sessionLoss) >= this._minSessionPnl) {
+        safetyLog("shutdown", "MAX_SESSION_LOSS", {
+          sessionLoss: this._sessionLoss,
+          threshold: this._minSessionPnl,
+        });
         this._startShutdown(
           `Session loss limit reached (total losses: $${this._sessionLoss.toFixed(2)}, threshold: -$${this._minSessionPnl.toFixed(2)}).`,
+        );
+        continue;
+      }
+
+      // Drawdown check: % of initial bankroll lost.
+      const ddPct = Env.get("MAX_DRAWDOWN_PCT");
+      if (ddPct > 0 && this._initialBalance > 0) {
+        const dd =
+          (this._initialBalance - this._tracker.balance) /
+          this._initialBalance;
+        if (dd >= ddPct) {
+          safetyLog("shutdown", "MAX_DRAWDOWN_PCT", {
+            initial: this._initialBalance,
+            current: this._tracker.balance,
+            drawdownPct: dd,
+            threshold: ddPct,
+          });
+          this._startShutdown(
+            `Max drawdown reached: ${(dd * 100).toFixed(2)}% >= ${(ddPct * 100).toFixed(2)}%.`,
+          );
+          continue;
+        }
+      }
+
+      // Daily loss check: |lossToday| against DAILY_LOSS_LIMIT.
+      const dailyLimit = Env.get("DAILY_LOSS_LIMIT");
+      if (
+        dailyLimit > 0 &&
+        Math.abs(this._daily.lossToday) >= dailyLimit
+      ) {
+        safetyLog("shutdown", "DAILY_LOSS_LIMIT", {
+          date: this._daily.date,
+          lossToday: this._daily.lossToday,
+          limit: dailyLimit,
+        });
+        this._startShutdown(
+          `Daily loss limit reached for ${this._daily.date}: $${this._daily.lossToday.toFixed(2)} (limit $${dailyLimit.toFixed(2)}).`,
         );
       }
     }
@@ -292,6 +389,7 @@ export class EarlyBird {
     saveState(this._statePath, {
       sessionPnl: this._sessionPnl,
       sessionLoss: this._sessionLoss,
+      daily: this._daily,
       activeMarkets,
       completedMarkets: this._completedMarkets,
     });

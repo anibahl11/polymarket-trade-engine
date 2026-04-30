@@ -22,6 +22,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import { Env } from "../utils/config";
+import { assertLiveOrdersAllowed, safetyLog } from "./safety.ts";
 
 const RELAYER_URL = "https://relayer-v2.polymarket.com";
 const POLYGON_RPC = "https://polygon-bor-rpc.publicnode.com";
@@ -46,8 +47,20 @@ const CTF_REDEEM_ABI = parseAbi([
 
 function simulateDelay() {
   const ms = parseInt(process.env.SIM_DELAY_MS ?? "", 10);
-  const delay = isNaN(ms) ? 150 + Math.random() * 10 : ms; // default 150–160ms
-  return new Promise((r) => setTimeout(r, delay));
+  const baseMs = isNaN(ms) ? 150 + Math.random() * 10 : ms; // default 150–160ms
+  const jitter = Env.get("SIM_LATENCY_JITTER_MS");
+  const j = jitter > 0 ? (Math.random() * 2 - 1) * jitter : 0;
+  return new Promise((r) => setTimeout(r, Math.max(0, baseMs + j)));
+}
+
+/**
+ * Round a price to the market's tick size. Mirrors the rounding the real CLOB
+ * applies so simulated fills stay on a valid grid.
+ */
+function clampToTick(price: number, tickSize: string): number {
+  const tick = parseFloat(tickSize);
+  if (!isFinite(tick) || tick <= 0) return price;
+  return Math.round(price / tick) * tick;
 }
 
 export type MultiOrderRequest = {
@@ -146,6 +159,31 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
     orders: MultiOrderRequest[],
   ): Promise<PlacedOrder[]> {
     await simulateDelay();
+    safetyLog("SIM", "postOrders", {
+      count: orders.length,
+      orders: orders.map((o) => ({
+        side: o.action,
+        price: o.price,
+        shares: o.shares,
+        orderType: o.orderType ?? "GTC",
+      })),
+    });
+
+    // Optional: simulate transient network failure to exercise retry path.
+    const failProb = Env.get("SIM_NETWORK_FAIL_PROB");
+    if (failProb > 0 && Math.random() < failProb) {
+      return orders.map(() => ({
+        orderId: "",
+        status: "",
+        success: false,
+        errorMsg: "sim: network error (SIM_NETWORK_FAIL_PROB)",
+      }));
+    }
+
+    const slipBps = Env.get("SIM_SLIPPAGE_BPS");
+    const partialProb = Env.get("SIM_PARTIAL_FILL_PROB");
+    const feeBps = Env.get("SIM_FEE_BPS");
+
     return orders.map((req) => {
       if (req.action === "sell") {
         const readyAt = this._balanceReadyAt.get(req.tokenId) ?? 0;
@@ -165,13 +203,39 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
         const book = this.getBook(req.tokenId);
         if (isSimFilled(req, book)) {
           const orderId = crypto.randomUUID();
+
+          // Apply slippage: buy fills slightly higher, sell fills slightly lower.
+          let fillPrice = req.price;
+          if (slipBps > 0) {
+            const mul =
+              req.action === "buy" ? 1 + slipBps / 10000 : 1 - slipBps / 10000;
+            fillPrice = clampToTick(req.price * mul, req.tickSize);
+          }
+
+          // Optional partial fill: reduce filled shares to a random fraction.
+          let actualShares = req.shares;
+          if (partialProb > 0 && Math.random() < partialProb) {
+            actualShares = Math.max(
+              1,
+              Math.floor(req.shares * (0.2 + Math.random() * 0.6)),
+            );
+          }
+
+          // Optional taker fee: mirrors prod fee bookkeeping (deduct from
+          // filled shares on buys so downstream PnL accounting matches).
+          if (feeBps > 0 && req.action === "buy") {
+            const feeShares =
+              actualShares * (feeBps / 10000) * (1 - fillPrice);
+            actualShares = Math.max(0, actualShares - feeShares);
+          }
+
           this._orders.set(orderId, {
             id: orderId,
             tokenId: req.tokenId,
             action: req.action,
-            price: req.price,
+            price: fillPrice,
             shares: req.shares,
-            actualShares: req.shares,
+            actualShares,
             status: "filled",
           });
           if (req.action === "buy") {
@@ -385,6 +449,16 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   async postMultipleOrders(
     orders: MultiOrderRequest[],
   ): Promise<PlacedOrder[]> {
+    assertLiveOrdersAllowed("PolymarketEarlyBirdClient.postMultipleOrders");
+    safetyLog("LIVE", "postOrders", {
+      count: orders.length,
+      orders: orders.map((o) => ({
+        side: o.action,
+        price: o.price,
+        shares: o.shares,
+        orderType: o.orderType ?? "GTC",
+      })),
+    });
     // Sign all orders in parallel, passing pre-fetched options to skip network calls
     // This is fully offline
     const signed = await Promise.all(
@@ -452,11 +526,15 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   }
 
   async cancelOrder(orderId: string): Promise<void> {
+    assertLiveOrdersAllowed("PolymarketEarlyBirdClient.cancelOrder");
+    safetyLog("LIVE", "cancelOrder", { orderId });
     await this.clob.cancelOrder({ orderID: orderId });
   }
 
   async cancelOrders(orderIds: string[]): Promise<CancelOrderResponse> {
     if (orderIds.length === 0) return { canceled: [], not_canceled: {} };
+    assertLiveOrdersAllowed("PolymarketEarlyBirdClient.cancelOrders");
+    safetyLog("LIVE", "cancelOrders", { count: orderIds.length });
     const resp = await this.clob.cancelOrders(orderIds);
     return resp as CancelOrderResponse;
   }
@@ -527,6 +605,8 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   }
 
   async wrapUSDC(amount: bigint): Promise<void> {
+    assertLiveOrdersAllowed("PolymarketEarlyBirdClient.wrapUSDC");
+    safetyLog("LIVE", "wrapUSDC", { amount: amount.toString() });
     const funder = (this._funder ?? this._signer.address) as `0x${string}`;
     const relay = this._buildRelay();
     const response = await relay.execute(
@@ -557,6 +637,8 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   }
 
   async unwrapUSDC(amount: bigint): Promise<void> {
+    assertLiveOrdersAllowed("PolymarketEarlyBirdClient.unwrapUSDC");
+    safetyLog("LIVE", "unwrapUSDC", { amount: amount.toString() });
     const funder = (this._funder ?? this._signer.address) as `0x${string}`;
     const relay = this._buildRelay();
     const response = await relay.execute(
@@ -587,6 +669,8 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
   }
 
   async redeemPositions(conditionId: string, silent = false): Promise<void> {
+    assertLiveOrdersAllowed("PolymarketEarlyBirdClient.redeemPositions");
+    safetyLog("LIVE", "redeemPositions", { conditionId });
     const relay = this._buildRelay();
     const data = encodeFunctionData({
       abi: CTF_REDEEM_ABI,

@@ -3,6 +3,11 @@ import * as readline from "readline";
 import { EarlyBird } from "./engine/early-bird.ts";
 import { strategies, DEFAULT_STRATEGY } from "./engine/strategy/index.ts";
 import { acquireProcessLock } from "./utils/process-lock.ts";
+import { Env } from "./utils/config.ts";
+import {
+  resolveSafetyMode,
+  printStartupBanner,
+} from "./engine/safety.ts";
 
 const program = new Command()
   .description(
@@ -26,7 +31,11 @@ const program = new Command()
   )
   .option(
     "--prod",
-    "Run against the real Polymarket CLOB (requires PRIVATE_KEY)",
+    "Run against the real Polymarket CLOB (also requires SIMULATION_MODE=false)",
+  )
+  .option(
+    "--dry-run",
+    "Force simulation mode regardless of --prod and SIMULATION_MODE env",
   )
   .option(
     "--rounds <n>",
@@ -48,6 +57,7 @@ const opts = program.opts<{
   strategy: string;
   slotOffset: number;
   prod?: boolean;
+  dryRun?: boolean;
   rounds?: number;
   alwaysLog?: boolean;
 }>();
@@ -60,7 +70,21 @@ if (!strategies[opts.strategy]) {
   process.exit(1);
 }
 
-if (opts.prod && process.env.FORCE_PROD !== "true") {
+const mode = resolveSafetyMode({
+  prodFlag: opts.prod ?? false,
+  dryRun: opts.dryRun ?? false,
+  envSimulationMode: Env.get("SIMULATION_MODE"),
+});
+
+printStartupBanner(mode);
+
+if (opts.prod && opts.dryRun) {
+  console.log(
+    "\x1b[33mNote: --prod is ignored because --dry-run was passed.\x1b[0m",
+  );
+}
+
+if (mode.live && process.env.FORCE_PROD !== "true") {
   const answer = await new Promise<string>((resolve) => {
     const rl = readline.createInterface({
       input: process.stdin,
@@ -79,15 +103,20 @@ if (opts.prod && process.env.FORCE_PROD !== "true") {
     console.log("Aborted.");
     process.exit(0);
   }
-
-  process.env.PROD = "true";
 }
+
+// Keep PROD env aligned with the resolved mode so downstream consumers
+// (per-strategy guards, recovery, logs) see a consistent signal.
+process.env.PROD = mode.live ? "true" : "false";
+// Re-affirm SIMULATION_MODE to whatever resolution decided so the
+// defense-in-depth gate in client.ts agrees with the banner.
+process.env.SIMULATION_MODE = mode.live ? "false" : "true";
 
 const rounds = opts.rounds !== undefined ? opts.rounds : null;
 const bot = new EarlyBird(
   opts.strategy,
   opts.slotOffset,
-  opts.prod ?? false,
+  mode.live,
   rounds,
   opts.alwaysLog ?? false,
 );

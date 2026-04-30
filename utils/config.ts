@@ -11,6 +11,19 @@ export type Config = {
   BUILDER_KEY: string;
   BUILDER_SECRET: string;
   BUILDER_PASSPHRASE: string;
+
+  // Safety / risk
+  SIMULATION_MODE: boolean;
+  MAX_POSITION_PCT: number;
+  MAX_DRAWDOWN_PCT: number;
+  DAILY_LOSS_LIMIT: number;
+
+  // Sim realism (all default 0 / disabled)
+  SIM_PARTIAL_FILL_PROB: number;
+  SIM_SLIPPAGE_BPS: number;
+  SIM_FEE_BPS: number;
+  SIM_NETWORK_FAIL_PROB: number;
+  SIM_LATENCY_JITTER_MS: number;
 };
 
 const ASSET_TICKER_MAP: Record<
@@ -71,6 +84,19 @@ export class Env {
     BUILDER_KEY: "",
     BUILDER_SECRET: "",
     BUILDER_PASSPHRASE: "",
+
+    // Safety: simulation is the safe default. Live trading requires both
+    // SIMULATION_MODE=false AND the --prod CLI flag.
+    SIMULATION_MODE: true,
+    MAX_POSITION_PCT: 0.05,
+    MAX_DRAWDOWN_PCT: 0.2,
+    DAILY_LOSS_LIMIT: 0,
+
+    SIM_PARTIAL_FILL_PROB: 0,
+    SIM_SLIPPAGE_BPS: 0,
+    SIM_FEE_BPS: 0,
+    SIM_NETWORK_FAIL_PROB: 0,
+    SIM_LATENCY_JITTER_MS: 0,
   };
 
   static get<T extends keyof Config>(key: T): Config[T] {
@@ -83,6 +109,11 @@ export class Env {
     // Infer type from default value
     if (typeof defaultVal === "boolean") {
       return (raw === "true") as Config[T];
+    }
+
+    if (typeof defaultVal === "number") {
+      const n = parseFloat(raw);
+      return (isNaN(n) ? defaultVal : n) as Config[T];
     }
 
     if (Array.isArray(defaultVal)) {
