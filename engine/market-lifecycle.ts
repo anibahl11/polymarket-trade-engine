@@ -13,6 +13,7 @@ import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
 import { Env } from "../utils/config.ts";
+import { exceedsMaxPosition, modeTag, safetyLog } from "./safety.ts";
 
 export type LifecycleState = "INIT" | "RUNNING" | "STOPPING" | "DONE";
 
@@ -681,6 +682,35 @@ export class MarketLifecycle {
         });
         if (remaining.length === 0) break;
 
+        // Risk gate: drop buys that exceed MAX_POSITION_PCT of bankroll.
+        // Applied here (before the canPlaceBuy retry loop) so oversized buys
+        // are rejected immediately rather than retried.
+        const balance = this._tracker.balance;
+        remaining = remaining.filter((item) => {
+          if (item.req.action !== "buy") return true;
+          const cost = item.req.price * item.req.shares;
+          if (!exceedsMaxPosition(cost, balance)) return true;
+          const side =
+            item.req.tokenId === this._clobTokenIds?.[0] ? "UP" : "DOWN";
+          safetyLog("blocked", "MAX_POSITION_PCT", {
+            slug: this.slug,
+            side,
+            price: item.req.price,
+            shares: item.req.shares,
+            cost,
+            balance,
+            pct: balance > 0 ? cost / balance : null,
+            limit: Env.get("MAX_POSITION_PCT"),
+          });
+          this._log(
+            `[${this.slug}] Blocked ${side} buy: cost $${cost.toFixed(2)} exceeds MAX_POSITION_PCT (${(Env.get("MAX_POSITION_PCT") * 100).toFixed(2)}% of $${balance.toFixed(2)}).`,
+            "yellow",
+          );
+          if (item.onFailed) item.onFailed("blocked by MAX_POSITION_PCT");
+          return false;
+        });
+        if (remaining.length === 0) break;
+
         // Pre-flight: skip network call for orders the tracker knows will fail
         const retryNext: typeof remaining = [];
         remaining = remaining.filter((item) => {
@@ -720,6 +750,18 @@ export class MarketLifecycle {
             negRisk: false,
           })),
         );
+
+        const okCount = placed.filter((p) => p?.orderId).length;
+        const errCount = placed.length - okCount;
+        const errors = placed
+          .filter((p) => p?.errorMsg)
+          .map((p) => p!.errorMsg);
+        safetyLog(modeTag(), "placed", {
+          slug: this.slug,
+          ok: okCount,
+          failed: errCount,
+          errors,
+        });
 
         for (let i = 0; i < placed.length; i++) {
           const p = placed[i];

@@ -18,9 +18,17 @@ export type CompletedMarketState = {
   orderHistory: CompletedOrder[];
 };
 
+export type DailyLossState = {
+  /** YYYY-MM-DD (UTC). */
+  date: string;
+  /** Cumulative negative PnL today (stored as a negative number). */
+  lossToday: number;
+};
+
 export type PersistentState = {
   sessionPnl: number;
   sessionLoss?: number;
+  daily?: DailyLossState;
   activeMarkets: MarketState[];
   completedMarkets: CompletedMarketState[];
 };
