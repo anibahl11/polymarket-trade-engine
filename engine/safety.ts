@@ -31,13 +31,21 @@ export function printStartupBanner(mode: SafetyMode): void {
     const red = "\x1b[41m\x1b[97m";
     const reset = "\x1b[0m";
     console.log(
-      `${red}${bar}\n  *** LIVE TRADING — REAL MONEY AT RISK ***\n  ${mode.reason}\n${bar}${reset}`,
+      `${red}${bar}\n` +
+      `  ⚠️  LIVE TRADING — REAL MONEY AT RISK\n` +
+      `  ${mode.reason}\n` +
+      `  All orders go to the real Polymarket CLOB. Losses are permanent.\n` +
+      `${bar}${reset}`,
     );
   } else {
     const green = "\x1b[42m\x1b[30m";
     const reset = "\x1b[0m";
     console.log(
-      `${green}${bar}\n  SIMULATION MODE — no real orders will be sent\n  ${mode.reason}\n${bar}${reset}`,
+      `${green}${bar}\n` +
+      `  📋 PAPER TRADING — simulated balance, no real orders sent\n` +
+      `  ${mode.reason}\n` +
+      `  Wallet balance is virtual. Connect a real wallet to go live.\n` +
+      `${bar}${reset}`,
     );
   }
 }

@@ -13,6 +13,8 @@ import { log } from "./log.ts";
 import { recover } from "./recovery.ts";
 import {
   strategies,
+  strategyVersions,
+  strategyParamsSchemas,
   DEFAULT_STRATEGY,
   type Strategy,
 } from "./strategy/index.ts";
@@ -20,8 +22,11 @@ import { WalletTracker } from "./wallet-tracker.ts";
 import { TickerTracker } from "../tracker/ticker";
 import { Env } from "../utils/config.ts";
 import { modeTag, safetyLog, utcDate } from "./safety.ts";
+import { DbHooks } from "./db-hooks.ts";
 
 const SAVE_INTERVAL_MS = 5000;
+// Set PERF_DB=true to enable performance database recording.
+const PERF_DB_ENABLED = process.env.PERF_DB === "true";
 
 export class EarlyBird {
   private _lifecycles = new Map<string, MarketLifecycle>();
@@ -47,6 +52,7 @@ export class EarlyBird {
   private _ticker = new TickerTracker();
   private _initialBalance = 0;
   private _daily: DailyLossState = { date: utcDate(), lossToday: 0 };
+  private _dbHooks: DbHooks | null = null;
 
   constructor(
     strategyName?: string,
@@ -106,12 +112,21 @@ export class EarlyBird {
       }
     } else {
       initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
-      log.write(`[startup] Sim balance: $${initialBalance.toFixed(2)}`);
+      log.write(`[startup] 📋 PAPER TRADING — simulated balance: $${initialBalance.toFixed(2)} (not real money)`, "yellow");
     }
     this._initialBalance = initialBalance;
     this._tracker = new WalletTracker(initialBalance, (msg) =>
       log.write(msg, "dim"),
     );
+
+    // Initialise performance DB hooks if opted in via PERF_DB=true.
+    if (PERF_DB_ENABLED) {
+      const schema = strategyParamsSchemas[this._strategyName] ?? null;
+      this._dbHooks = new DbHooks(this._ticker, null, schema);
+      const version = strategyVersions[this._strategyName] ?? "0.0.0";
+      this._dbHooks.onSessionStart(this._strategyName, version, initialBalance);
+      log.write(`[startup] Performance DB recording (strategy: ${this._strategyName}@${version}, mode: ${this._prod ? "LIVE" : "SIM"})`, "dim");
+    }
 
     log.write(
       `[startup] Min session PnL exit: $${this._minSessionPnl.toFixed(2)}`,
@@ -217,20 +232,22 @@ export class EarlyBird {
     if (!this._shuttingDown && !roundsExhausted) {
       const slug = getSlug(this._slotOffset);
       if (!this._lifecycles.has(slug) && !this._completedSlugs.has(slug)) {
-        this._lifecycles.set(
+        const newLifecycle = new MarketLifecycle({
           slug,
-          new MarketLifecycle({
-            slug,
-            apiQueue: this._apiQueue,
-            client: this._client,
-            log: (msg, color) => log.write(msg, color),
-            strategyName: this._strategyName,
-            strategy: this._strategy,
-            tracker: this._tracker,
-            ticker: this._ticker,
-            alwaysLog: this._alwaysLog,
-          }),
-        );
+          apiQueue: this._apiQueue,
+          client: this._client,
+          log: (msg, color) => log.write(msg, color),
+          strategyName: this._strategyName,
+          strategy: this._strategy,
+          tracker: this._tracker,
+          ticker: this._ticker,
+          alwaysLog: this._alwaysLog,
+        });
+        this._lifecycles.set(slug, newLifecycle);
+        // Notify DB of the new round (slot timestamps come from the slug).
+        const slotEndMs = newLifecycle.slotEndMs;
+        const slotStartMs = slotEndMs - 300_000;
+        this._dbHooks?.onRoundStart(slug, slotStartMs, slotEndMs);
         this._roundsCreated++;
       }
     }
@@ -281,6 +298,28 @@ export class EarlyBird {
         pnl: lifecycle.pnl,
         orderHistory: lifecycle.orderHistory,
       });
+
+      // Record round outcome to the performance DB.
+      if (this._dbHooks) {
+        const slotEnd = lifecycle.slotEndMs;
+        const slotStart = slotEnd - 300_000;
+        // marketResult is keyed by slot.startTime (Unix ms)
+        const marketResult = this._apiQueue.marketResult.get(slotStart);
+        this._dbHooks.onRoundEnd({
+          slug,
+          strategyName: lifecycle.strategyName,
+          pnl: lifecycle.pnl,
+          orderHistory: lifecycle.orderHistory,
+          openPrice:  marketResult?.openPrice  ?? null,
+          closePrice: marketResult?.closePrice ?? null,
+          direction:  marketResult?.closePrice != null && marketResult?.openPrice != null
+            ? (marketResult.closePrice > marketResult.openPrice ? "UP" : "DOWN")
+            : null,
+          slotStartMs: slotStart,
+          slotEndMs:   slotEnd,
+        });
+      }
+
       lifecycle.destroy();
       this._lifecycles.delete(slug);
       this._completedSlugs.add(slug);
@@ -357,6 +396,14 @@ export class EarlyBird {
     this._shuttingDown = true;
     log.write(`[shutdown] ${reason}`, "yellow");
     log.write("[shutdown] Signalling all lifecycles to cancel.", "yellow");
+
+    // Record session end to the performance DB.
+    this._dbHooks?.onSessionEnd(
+      this._sessionPnl,
+      this._sessionLoss,
+      this._roundsCreated,
+      this._tracker.balance,
+    );
 
     for (const [, lifecycle] of this._lifecycles) {
       lifecycle.shutdown();

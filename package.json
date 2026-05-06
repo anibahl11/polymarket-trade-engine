@@ -3,7 +3,10 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "check": "tsc -b --noEmit"
+    "check": "tsc -b --noEmit",
+    "start": "bun index.ts",
+    "dashboard": "bun dashboard/server.ts",
+    "start:all": "bun dashboard/server.ts & bun index.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Polymarket Engine Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js" defer></script>
+<style>
+  :root {
+    --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+    --border: #30363d; --text: #e6edf3; --muted: #8b949e;
+    --green: #3fb950; --red: #f85149; --blue: #58a6ff;
+    --yellow: #d29922; --purple: #bc8cff; --orange: #ffa657;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+  /* SIM mode: yellow top border; LIVE mode: red top border */
+  body.mode-sim  { border-top: 3px solid var(--yellow); }
+  body.mode-live { border-top: 3px solid var(--red); }
+  header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 16px; font-weight: 600; color: var(--blue); }
+  header .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--bg3); border: 1px solid var(--border); }
+  header .badge.live-session { border-color: var(--green); color: var(--green); }
+  /* Mode pill — always visible, prominent */
+  .mode-pill {
+    font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 4px;
+    letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .mode-pill.sim  { background: rgba(210,153,34,.2); color: var(--yellow); border: 1px solid var(--yellow); }
+  .mode-pill.live { background: rgba(248,81,73,.2);  color: var(--red);    border: 1px solid var(--red); }
+  /* Sim disclaimer banner */
+  .sim-banner {
+    background: rgba(210,153,34,.08); border-bottom: 1px solid rgba(210,153,34,.3);
+    padding: 6px 20px; font-size: 12px; color: var(--yellow);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sim-banner.hidden { display: none; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 2px; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 20px; }
+  nav button { background: none; border: none; color: var(--muted); padding: 10px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  nav button:hover { color: var(--text); }
+  nav button.active { color: var(--blue); border-bottom-color: var(--blue); }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .grid { display: grid; gap: 16px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 12px; }
+  .stat { font-size: 28px; font-weight: 700; }
+  .stat.green { color: var(--green); } .stat.red { color: var(--red); }
+  .stat.blue { color: var(--blue); } .stat.yellow { color: var(--yellow); }
+  .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .chart-wrap { position: relative; height: 260px; }
+  .chart-wrap.tall { height: 360px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th { padding: 8px 12px; text-align: left; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 12px; text-transform: uppercase; }
+  tbody td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  tbody tr:hover { background: var(--bg3); cursor: pointer; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .pill.win { background: rgba(63,185,80,.15); color: var(--green); }
+  .pill.loss { background: rgba(248,81,73,.15); color: var(--red); }
+  .pill.no-trade { background: rgba(139,148,158,.15); color: var(--muted); }
+  .pill.no-data { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .pill.UP { background: rgba(88,166,255,.15); color: var(--blue); }
+  .pill.DOWN { background: rgba(188,140,255,.15); color: var(--purple); }
+  select, input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .label { font-size: 12px; color: var(--muted); }
+  .warn { background: rgba(210,153,34,.1); border: 1px solid var(--yellow); border-radius: 6px; padding: 8px 12px; color: var(--yellow); font-size: 12px; margin-bottom: 12px; }
+  .no-data-msg { text-align: center; color: var(--muted); padding: 40px; font-size: 13px; }
+  .order-row { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .order-row:last-child { border-bottom: none; }
+  .pnl-positive::before { content: "+"; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .fee-zone { stroke: var(--green); opacity: 0.15; }
+  @media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body x-data="app()" x-init="init()" :class="isLiveMode ? 'mode-live' : 'mode-sim'">
+
+<header>
+  <h1>⚡ Polymarket Engine</h1>
+  <!-- Mode pill — most important signal on the page -->
+  <span class="mode-pill" :class="isLiveMode ? 'live' : 'sim'"
+        x-text="isLiveMode ? '🔴 LIVE MONEY' : '📋 PAPER TRADING'"></span>
+  <span class="badge" :class="live.session ? 'live-session' : ''"
+        x-text="live.session ? '● ENGINE RUNNING' : '○ ENGINE IDLE'"></span>
+  <span class="badge" x-text="live.session ? live.session.strategy_id : 'No active session'"></span>
+  <div class="spacer"></div>
+  <span class="label" x-text="'Updated ' + lastUpdated"></span>
+</header>
+
+<!-- Persistent disclaimer strip — hidden when live -->
+<div class="sim-banner" :class="isLiveMode ? 'hidden' : ''">
+  📋 Paper trading active — all balances are simulated, no real money is at risk.
+  Connect a real wallet and set <code>SIMULATION_MODE=false --prod</code> to go live.
+</div>
+
+<nav>
+  <button :class="tab==='live' && 'active'" @click="tab='live'">Live</button>
+  <button :class="tab==='performance' && 'active'" @click="tab='performance'; loadPerf()">Performance</button>
+  <button :class="tab==='compare' && 'active'" @click="tab='compare'; loadCompare()">Compare</button>
+  <button :class="tab==='projections' && 'active'" @click="tab='projections'; loadProjections()">Projections</button>
+  <button :class="tab==='rounds' && 'active'" @click="tab='rounds'; loadRounds()">Round Browser</button>
+</nav>
+
+<main>
+
+<!-- ═══════════════════════════════════════════════════════════ LIVE ══ -->
+<div x-show="tab==='live'">
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div class="card">
+      <h3>Session PnL</h3>
+      <div class="stat" :class="(live.state?.sessionPnl??0)>=0?'green':'red'"
+           x-text="fmt(live.state?.sessionPnl??0, true)"></div>
+      <div class="sub" x-text="(live.state?.activeMarkets?.length??0)+' active markets'"></div>
+    </div>
+    <div class="card">
+      <h3>BTC Price</h3>
+      <div class="stat blue" x-text="live.session ? '$'+((live.state?.btcPrice??0).toLocaleString()) : '—'"></div>
+      <div class="sub" x-text="live.session ? 'Killswitch: '+(live.state?.killswitch?'ON':'off') : 'Engine idle'"></div>
+    </div>
+    <div class="card" :style="isLiveMode ? 'border-color:var(--red)' : 'border-color:var(--yellow)'">
+      <h3 x-text="isLiveMode ? '💰 On-Chain Balance' : '📋 Simulated Balance'"></h3>
+      <div class="stat" x-text="fmt(live.state?.balance??live.session?.wallet_start??0)"></div>
+      <div class="sub" x-text="isLiveMode ? 'Real pUSD on Polygon' : 'Virtual — not real money'"></div>
+    </div>
+    <div class="card">
+      <h3>Session Rounds</h3>
+      <div class="stat blue" x-text="live.session?.total_rounds??0"></div>
+      <div class="sub" x-text="live.session ? 'Strategy: '+live.session.strategy_id : '—'"></div>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Active Markets</h3>
+      <template x-if="!(live.state?.activeMarkets?.length)">
+        <div class="no-data-msg">No active markets</div>
+      </template>
+      <template x-for="m in (live.state?.activeMarkets??[])" :key="m.slug">
+        <div class="order-row">
+          <span class="pill" :class="m.state" x-text="m.state"></span>
+          <span x-text="m.slug" style="font-size:12px;color:var(--muted);flex:1"></span>
+          <span x-text="m.strategyName" style="font-size:11px;color:var(--muted)"></span>
+          <span x-text="m.orderHistory?.length+' fills'" style="font-size:11px"></span>
+        </div>
+      </template>
+    </div>
+    <div class="card">
+      <h3>Recent Completed Markets</h3>
+      <template x-if="!(live.state?.completedMarkets?.length)">
+        <div class="no-data-msg">No completed markets this session</div>
+      </template>
+      <template x-for="m in (live.state?.completedMarkets??[]).slice(-8).reverse()" :key="m.slug">
+        <div class="order-row">
+          <span class="pill" :class="(m.pnl??0)>0?'win':'loss'" x-text="(m.pnl??0)>0?'WIN':'LOSS'"></span>
+          <span x-text="m.slug" style="font-size:12px;color:var(--muted);flex:1"></span>
+          <span :class="(m.pnl??0)>=0?'green':'red'" x-text="fmt(m.pnl??0, true)" style="font-weight:600"></span>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>Fee Curve — Polymarket Dynamic Taker Fee (0.072 × p × (1−p))</h3>
+    <div class="chart-wrap">
+      <canvas id="feeChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════ PERFORMANCE ══ -->
+<div x-show="tab==='performance'" x-cloak>
+  <div class="controls">
+    <span class="label">Period:</span>
+    <select x-model="perfPeriod" @change="loadPerf()">
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+      <option value="3m">3 Month</option>
+      <option value="6m">6 Month</option>
+      <option value="1y">1 Year</option>
+      <option value="3y">3 Year</option>
+    </select>
+    <span class="label">Strategy:</span>
+    <select x-model="perfStrategy" @change="loadPerf()">
+      <option value="">All strategies</option>
+      <template x-for="s in strategies" :key="s.id">
+        <option :value="s.id" x-text="s.id"></option>
+      </template>
+    </select>
+  </div>
+
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <h3>Equity Curve</h3>
+      <div class="chart-wrap tall">
+        <canvas id="equityChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Net PnL by Period</h3>
+      <div class="chart-wrap tall">
+        <canvas id="pnlBarChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Period Summary</h3>
+    <template x-if="!perf.length">
+      <div class="no-data-msg">No data — run the engine with PERF_DB=true to populate the database.</div>
+    </template>
+    <table x-show="perf.length">
+      <thead>
+        <tr>
+          <th>Period</th><th>Rounds</th><th>Trades</th><th>Wins</th><th>Losses</th>
+          <th>Win Rate</th><th>Net PnL</th><th>Avg PnL</th><th>Fees</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="row in perf" :key="row.period">
+          <tr>
+            <td x-text="row.period"></td>
+            <td x-text="row.total_rounds"></td>
+            <td x-text="row.traded_rounds"></td>
+            <td style="color:var(--green)" x-text="row.win_count"></td>
+            <td style="color:var(--red)" x-text="row.loss_count"></td>
+            <td x-text="row.win_rate!=null ? pct(row.win_rate) : '—'"></td>
+            <td :style="(row.total_net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
+                x-text="fmt(row.total_net_pnl??0, true)"></td>
+            <td x-text="row.avg_net_pnl!=null ? fmt(row.avg_net_pnl,true) : '—'"></td>
+            <td style="color:var(--yellow)" x-text="fmt(row.total_fees??0)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ COMPARE ══ -->
+<div x-show="tab==='compare'" x-cloak>
+  <div class="card" style="margin-bottom:16px">
+    <h3>Strategy Comparison</h3>
+    <template x-if="!compare.rows?.length">
+      <div class="no-data-msg">No strategy data yet.</div>
+    </template>
+    <table x-show="compare.rows?.length">
+      <thead>
+        <tr>
+          <th>Strategy</th><th>Rounds</th><th>Trades</th><th>Win Rate</th>
+          <th>Net PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th>
+          <th>Fees</th><th>Sharpe~</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="row in (compare.rows??[])" :key="row.strategy_id">
+          <tr>
+            <td style="font-weight:600" x-text="row.strategy_id"></td>
+            <td x-text="row.total_rounds"></td>
+            <td x-text="row.traded_rounds"></td>
+            <td x-text="row.win_rate!=null ? pct(row.win_rate) : '—'"></td>
+            <td :style="(row.total_net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
+                x-text="fmt(row.total_net_pnl??0, true)"></td>
+            <td x-text="row.avg_net_pnl!=null ? fmt(row.avg_net_pnl,true) : '—'"></td>
+            <td style="color:var(--green)" x-text="row.best_round!=null ? fmt(row.best_round,true) : '—'"></td>
+            <td style="color:var(--red)"   x-text="row.worst_round!=null ? fmt(row.worst_round,true) : '—'"></td>
+            <td style="color:var(--yellow)" x-text="fmt(row.total_fees??0)"></td>
+            <td x-text="row.sharpe_approx!=null ? row.sharpe_approx.toFixed(2) : '—'"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Equity Curves (overlay)</h3>
+    <div class="chart-wrap tall">
+      <canvas id="compareChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════ PROJECTIONS ══ -->
+<div x-show="tab==='projections'" x-cloak>
+  <div class="controls">
+    <span class="label">Strategy:</span>
+    <select x-model="projStrategy" @change="loadProjections()">
+      <option value="">— select strategy —</option>
+      <template x-for="s in strategies" :key="s.id">
+        <option :value="s.id" x-text="s.id"></option>
+      </template>
+    </select>
+    <span class="label">Period:</span>
+    <select x-model="projPeriod" @change="renderProjectionChart()">
+      <option value="1d">1 Day</option>
+      <option value="1w">1 Week</option>
+      <option value="1m">1 Month</option>
+      <option value="3m">3 Months</option>
+      <option value="6m" selected>6 Months</option>
+      <option value="1y">1 Year</option>
+      <option value="3y">3 Years</option>
+    </select>
+  </div>
+
+  <template x-if="proj && proj.input?.n < 30">
+    <div class="warn">⚠ Based on <span x-text="proj.input?.n"></span> rounds — projections unreliable below 30 rounds. Showing Bernoulli approximation.</div>
+  </template>
+
+  <div class="grid grid-4" style="margin-bottom:16px" x-show="proj">
+    <div class="card">
+      <h3>Win Rate</h3>
+      <div class="stat blue" x-text="proj ? pct(proj.input?.win_rate??0) : '—'"></div>
+      <div class="sub" x-text="'Break-even: '+(proj?.breakEven!=null ? pct(proj.breakEven) : '—')"></div>
+    </div>
+    <div class="card">
+      <h3>Avg Win / Loss</h3>
+      <div style="display:flex;gap:8px;align-items:baseline">
+        <span class="stat green" style="font-size:22px" x-text="proj ? fmt(proj.input?.avg_win??0,true) : '—'"></span>
+        <span style="color:var(--muted)">/</span>
+        <span class="stat red" style="font-size:22px" x-text="proj ? fmt(proj.input?.avg_loss??0,true) : '—'"></span>
+      </div>
+      <div class="sub">Per-trade averages</div>
+    </div>
+    <div class="card">
+      <h3>Kelly Fraction</h3>
+      <div class="stat" :class="(proj?.kelly??0)>0?'green':'red'"
+           x-text="proj?.kelly!=null ? pct(proj.kelly) : '—'"></div>
+      <div class="sub" x-text="'¼-Kelly: '+(proj?.quarterKelly!=null ? pct(proj.quarterKelly) : '—')"></div>
+    </div>
+    <div class="card">
+      <h3>Sample Size</h3>
+      <div class="stat blue" x-text="proj?.input?.n??0"></div>
+      <div class="sub" x-text="(proj?.input?.n??0)>=30 ? '✓ Bootstrap mode' : '⚠ Low confidence'"></div>
+    </div>
+  </div>
+
+  <template x-if="!projStrategy">
+    <div class="no-data-msg">Select a strategy to see projections.</div>
+  </template>
+
+  <div class="grid grid-2" x-show="proj">
+    <div class="card">
+      <h3>Monte Carlo Fan Chart (<span x-text="projPeriod"></span> — p10/p50/p90)</h3>
+      <div class="chart-wrap tall">
+        <canvas id="projChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Fee Cost Curve — Taker Fee % by Token Price</h3>
+      <div class="chart-wrap tall">
+        <canvas id="feeCurveChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px" x-show="proj">
+    <h3>Period Summary</h3>
+    <table>
+      <thead>
+        <tr><th>Period</th><th>Median Final PnL (p50)</th><th>p10</th><th>p90</th><th>Annualized</th><th>Max Drawdown (p50)</th><th>Confidence</th></tr>
+      </thead>
+      <tbody>
+        <template x-for="[key, res] in Object.entries(proj?.projections??{})" :key="key">
+          <tr>
+            <td x-text="key.toUpperCase()"></td>
+            <td :style="res.steps[res.steps.length-1].p50>=0?'color:var(--green)':'color:var(--red)'"
+                x-text="fmt(res.steps[res.steps.length-1].p50, true)"></td>
+            <td style="color:var(--red)"   x-text="fmt(res.steps[res.steps.length-1].p10, true)"></td>
+            <td style="color:var(--green)" x-text="fmt(res.steps[res.steps.length-1].p90, true)"></td>
+            <td x-text="res.annualizedReturn!=null ? fmt(res.annualizedReturn,true)+'/yr' : '—'"></td>
+            <td style="color:var(--yellow)" x-text="fmt(res.maxDrawdownP50)"></td>
+            <td>
+              <span class="pill" :class="res.confidence==='high'?'win':'no-data'" x-text="res.confidence"></span>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    <div style="margin-top:12px;font-size:11px;color:var(--muted)">
+      Projections use <span x-text="(proj?.input?.n??0)>=30?'bootstrap resampling of actual outcomes':'Bernoulli(winRate) simulation'"></span>.
+      Past performance is not indicative of future results. Use at your own risk.
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════════════════════════════ ROUND BROWSER ══ -->
+<div x-show="tab==='rounds'" x-cloak>
+  <div class="controls">
+    <span class="label">Strategy:</span>
+    <select x-model="roundStrategy" @change="loadRounds()">
+      <option value="">All</option>
+      <template x-for="s in strategies" :key="s.id">
+        <option :value="s.id" x-text="s.id"></option>
+      </template>
+    </select>
+    <span class="label">Outcome:</span>
+    <select x-model="roundOutcome" @change="loadRounds()">
+      <option value="">All</option>
+      <option value="win">Win</option>
+      <option value="loss">Loss</option>
+      <option value="no-trade">No Trade</option>
+      <option value="no-data">No Data</option>
+    </select>
+    <button @click="roundOffset=Math.max(0,roundOffset-50);loadRounds()" :disabled="roundOffset===0"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer">← Prev</button>
+    <span class="label" x-text="'Page '+(Math.floor(roundOffset/50)+1)">&nbsp;</span>
+    <button @click="roundOffset+=50;loadRounds()"
+            style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer">Next →</button>
+  </div>
+
+  <div class="card">
+    <template x-if="!rounds.length">
+      <div class="no-data-msg">No rounds found.</div>
+    </template>
+    <table x-show="rounds.length">
+      <thead>
+        <tr>
+          <th>#</th><th>Slug</th><th>Strategy</th><th>Direction</th>
+          <th>Entry</th><th>Exit</th><th>Shares</th><th>PnL</th><th>Net PnL</th>
+          <th>Fees</th><th>Outcome</th><th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="r in rounds" :key="r.id">
+          <tr @click="selectRound(r)">
+            <td x-text="r.id"></td>
+            <td style="font-size:11px;color:var(--muted)" x-text="r.slug"></td>
+            <td style="font-size:11px" x-text="r.strategy_id"></td>
+            <td><span class="pill" :class="r.direction" x-text="r.direction??'—'"></span></td>
+            <td x-text="r.entry_price!=null ? r.entry_price.toFixed(3) : '—'"></td>
+            <td x-text="r.exit_price!=null  ? r.exit_price.toFixed(3)  : '—'"></td>
+            <td x-text="r.shares_bought??0"></td>
+            <td :style="(r.pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
+                x-text="r.pnl!=null ? fmt(r.pnl,true) : '—'"></td>
+            <td :style="(r.net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
+                x-text="r.net_pnl!=null ? fmt(r.net_pnl,true) : '—'"></td>
+            <td style="color:var(--yellow)" x-text="fmt(r.taker_fees??0)"></td>
+            <td><span class="pill" :class="r.outcome??''" x-text="r.outcome??'—'"></span></td>
+            <td style="font-size:11px;color:var(--muted)" x-text="ts(r.created_at)"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Round detail modal -->
+  <div x-show="selectedRound" style="position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:100" @click.self="selectedRound=null">
+    <div class="card" style="width:600px;max-height:80vh;overflow-y:auto" x-show="selectedRound">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 x-text="selectedRound?.slug"></h3>
+        <button @click="selectedRound=null" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div class="grid grid-2" style="gap:12px;margin-bottom:16px">
+        <div><div class="label">Strategy</div><div x-text="selectedRound?.strategy_id"></div></div>
+        <div><div class="label">Outcome</div><span class="pill" :class="selectedRound?.outcome??''" x-text="selectedRound?.outcome??'—'"></span></div>
+        <div><div class="label">Open Price (BTC)</div><div x-text="selectedRound?.open_price??'—'"></div></div>
+        <div><div class="label">Close Price (BTC)</div><div x-text="selectedRound?.close_price??'—'"></div></div>
+        <div><div class="label">Direction</div><span class="pill" :class="selectedRound?.direction??''" x-text="selectedRound?.direction??'—'"></span></div>
+        <div><div class="label">Entry / Exit Price</div><div x-text="(selectedRound?.entry_price?.toFixed(3)??'—')+' / '+(selectedRound?.exit_price?.toFixed(3)??'—')"></div></div>
+        <div><div class="label">Shares Bought / Sold</div><div x-text="(selectedRound?.shares_bought??0)+' / '+(selectedRound?.shares_sold??0)"></div></div>
+        <div><div class="label">Taker Fees</div><div style="color:var(--yellow)" x-text="fmt(selectedRound?.taker_fees??0)"></div></div>
+        <div><div class="label">PnL</div><div :style="(selectedRound?.pnl??0)>=0?'color:var(--green)':'color:var(--red)'" x-text="fmt(selectedRound?.pnl??0,true)"></div></div>
+        <div><div class="label">Net PnL</div><div :style="(selectedRound?.net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'" x-text="fmt(selectedRound?.net_pnl??0,true)"></div></div>
+      </div>
+      <template x-if="selectedRound?.entry_reason">
+        <div style="margin-top:8px">
+          <div class="label" style="margin-bottom:4px">Entry Reason</div>
+          <pre style="background:var(--bg3);padding:10px;border-radius:6px;font-size:11px;overflow-x:auto" x-text="JSON.stringify(selectedRound?.entry_reason,null,2)"></pre>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<script>
+const PALETTE = ['#58a6ff','#3fb950','#bc8cff','#ffa657','#f85149','#d29922','#79c0ff'];
+
+function app() {
+  return {
+    tab: 'live',
+    lastUpdated: 'never',
+    strategies: [],
+    live: { session: null, state: null },
+    // true only when the DB session mode is "prod" — drives all SIM/LIVE UI
+    get isLiveMode() { return this.live.session?.mode === 'prod'; },
+
+    // Performance
+    perfPeriod: 'daily',
+    perfStrategy: '',
+    perf: [],
+
+    // Compare
+    compare: { rows: [], curves: {} },
+
+    // Projections
+    projStrategy: '',
+    projPeriod: '6m',
+    proj: null,
+
+    // Rounds
+    rounds: [],
+    roundStrategy: '',
+    roundOutcome: '',
+    roundOffset: 0,
+    selectedRound: null,
+
+    // Chart instances
+    _charts: {},
+
+    async init() {
+      await this.loadStrategies();
+      await this.loadLive();
+      this.renderFeeChart();
+      setInterval(() => this.loadLive(), 5000);
+    },
+
+    async loadStrategies() {
+      try {
+        const r = await fetch('/api/strategies');
+        this.strategies = await r.json();
+        if (!this.projStrategy && this.strategies.length) this.projStrategy = this.strategies[0].id;
+      } catch {}
+    },
+
+    async loadLive() {
+      try {
+        const r = await fetch('/api/live');
+        const d = await r.json();
+        this.live = d;
+        this.lastUpdated = new Date().toLocaleTimeString();
+      } catch {}
+    },
+
+    async loadPerf() {
+      try {
+        const qs = new URLSearchParams({ period: this.perfPeriod });
+        if (this.perfStrategy) qs.set('strategy', this.perfStrategy);
+        const [pRes, eRes] = await Promise.all([
+          fetch('/api/performance?'+qs),
+          fetch('/api/equity-curve?'+(this.perfStrategy ? 'strategy='+encodeURIComponent(this.perfStrategy) : '')),
+        ]);
+        this.perf = await pRes.json();
+        const equity = await eRes.json();
+        this.$nextTick(() => { this.renderEquityChart(equity); this.renderPnlBar(); });
+      } catch {}
+    },
+
+    async loadCompare() {
+      try {
+        const r = await fetch('/api/compare');
+        this.compare = await r.json();
+        this.$nextTick(() => this.renderCompareChart());
+      } catch {}
+    },
+
+    async loadProjections() {
+      if (!this.projStrategy) return;
+      try {
+        const r = await fetch('/api/projections?strategy='+encodeURIComponent(this.projStrategy));
+        this.proj = await r.json();
+        this.$nextTick(() => { this.renderProjectionChart(); this.renderFeeCurveChart(); });
+      } catch {}
+    },
+
+    async loadRounds() {
+      try {
+        const qs = new URLSearchParams({ limit: '50', offset: String(this.roundOffset) });
+        if (this.roundStrategy) qs.set('strategy', this.roundStrategy);
+        if (this.roundOutcome)  qs.set('outcome', this.roundOutcome);
+        const r = await fetch('/api/rounds?'+qs);
+        this.rounds = await r.json();
+      } catch {}
+    },
+
+    selectRound(r) { this.selectedRound = r; },
+
+    // ── Charts ──────────────────────────────────────────────────────────────
+
+    _destroyChart(id) {
+      if (this._charts[id]) { this._charts[id].destroy(); delete this._charts[id]; }
+    },
+
+    renderFeeChart() {
+      this._destroyChart('fee');
+      const el = document.getElementById('feeChart');
+      if (!el) return;
+      const prices = Array.from({length:99}, (_,i)=>(i+1)/100);
+      const fees   = prices.map(p => 0.072 * p * (1-p) * 100);
+      this._charts.fee = new Chart(el, {
+        type: 'line',
+        data: {
+          labels: prices.map(p=>p.toFixed(2)),
+          datasets: [{
+            label: 'Taker Fee %',
+            data: fees,
+            borderColor: '#ffa657',
+            backgroundColor: 'rgba(255,166,87,.08)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.parsed.y.toFixed(2)+'%' } },
+            annotation: {
+              annotations: {
+                zoneLow:  { type:'box', xMin:'0.01', xMax:'0.38', backgroundColor:'rgba(63,185,80,.07)', borderWidth:0, label:{content:'Fee-safe',display:true,color:'#3fb950',font:{size:10}} },
+                zoneHigh: { type:'box', xMin:'0.62', xMax:'0.99', backgroundColor:'rgba(63,185,80,.07)', borderWidth:0, label:{content:'Fee-safe',display:true,color:'#3fb950',font:{size:10}} },
+              }
+            }
+          },
+          scales: {
+            x: { ticks:{color:'#8b949e',maxTicksLimit:10}, grid:{color:'#21262d'} },
+            y: { ticks:{color:'#8b949e', callback:v=>v.toFixed(1)+'%'}, grid:{color:'#21262d'} }
+          }
+        }
+      });
+    },
+
+    renderEquityChart(equity) {
+      this._destroyChart('equity');
+      const el = document.getElementById('equityChart');
+      if (!el) return;
+      // Group by strategy_id
+      const byStrategy = {};
+      for (const pt of equity) {
+        if (!byStrategy[pt.strategy_id]) byStrategy[pt.strategy_id] = [];
+        byStrategy[pt.strategy_id].push(pt);
+      }
+      const datasets = Object.entries(byStrategy).map(([id, pts], i) => ({
+        label: id,
+        data: pts.map(p=>({ x: p.created_at, y: p.cumulative })),
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: 2,
+      }));
+      this._charts.equity = new Chart(el, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color:'#8b949e', font:{size:11} } } },
+          scales: {
+            x: { type:'linear', ticks:{color:'#8b949e', callback: v => new Date(v).toLocaleDateString()}, grid:{color:'#21262d'} },
+            y: { ticks:{color:'#8b949e', callback: v => '$'+v.toFixed(2)}, grid:{color:'#21262d'} }
+          }
+        }
+      });
+    },
+
+    renderPnlBar() {
+      this._destroyChart('pnlBar');
+      const el = document.getElementById('pnlBarChart');
+      if (!el || !this.perf.length) return;
+      this._charts.pnlBar = new Chart(el, {
+        type: 'bar',
+        data: {
+          labels: this.perf.map(p=>p.period),
+          datasets: [{
+            label: 'Net PnL',
+            data: this.perf.map(p=>p.total_net_pnl),
+            backgroundColor: this.perf.map(p=>(p.total_net_pnl??0)>=0?'rgba(63,185,80,.6)':'rgba(248,81,73,.6)'),
+            borderColor: this.perf.map(p=>(p.total_net_pnl??0)>=0?'#3fb950':'#f85149'),
+            borderWidth: 1,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks:{color:'#8b949e'}, grid:{color:'#21262d'} },
+            y: { ticks:{color:'#8b949e', callback: v=>'$'+v.toFixed(2)}, grid:{color:'#21262d'} }
+          }
+        }
+      });
+    },
+
+    renderCompareChart() {
+      this._destroyChart('compare');
+      const el = document.getElementById('compareChart');
+      if (!el) return;
+      const curves = this.compare.curves ?? {};
+      const datasets = Object.entries(curves).map(([id, pts], i) => ({
+        label: id,
+        data: pts.map(p=>({ x: p.created_at, y: p.cumulative })),
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: 1,
+      }));
+      this._charts.compare = new Chart(el, {
+        type: 'line',
+        data: { datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color:'#8b949e', font:{size:11} } } },
+          scales: {
+            x: { type:'linear', ticks:{color:'#8b949e', callback: v => new Date(v).toLocaleDateString()}, grid:{color:'#21262d'} },
+            y: { ticks:{color:'#8b949e', callback: v=>'$'+v.toFixed(2)}, grid:{color:'#21262d'} }
+          }
+        }
+      });
+    },
+
+    renderProjectionChart() {
+      this._destroyChart('proj');
+      const el = document.getElementById('projChart');
+      if (!el || !this.proj) return;
+      const data = this.proj.projections[this.projPeriod];
+      if (!data) return;
+      const labels = data.steps.map(s=>s.day);
+      this._charts.proj = new Chart(el, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label:'p90', data:data.steps.map(s=>s.p90), borderColor:'rgba(63,185,80,.6)', backgroundColor:'rgba(63,185,80,.05)', fill:'+1', tension:0.4, pointRadius:0 },
+            { label:'p50', data:data.steps.map(s=>s.p50), borderColor:'#58a6ff', backgroundColor:'rgba(88,166,255,.05)', fill:'+1', tension:0.4, pointRadius:0, borderWidth:2 },
+            { label:'p10', data:data.steps.map(s=>s.p10), borderColor:'rgba(248,81,73,.6)', backgroundColor:'rgba(248,81,73,.05)', fill:false, tension:0.4, pointRadius:0 },
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color:'#8b949e', font:{size:11} } } },
+          scales: {
+            x: { ticks:{color:'#8b949e', maxTicksLimit:8, callback: v=>'Day '+v}, grid:{color:'#21262d'} },
+            y: { ticks:{color:'#8b949e', callback: v=>'$'+Number(v).toFixed(2)}, grid:{color:'#21262d'} }
+          }
+        }
+      });
+    },
+
+    renderFeeCurveChart() {
+      this._destroyChart('feeCurve');
+      const el = document.getElementById('feeCurveChart');
+      if (!el) return;
+      const prices = Array.from({length:99}, (_,i)=>(i+1)/100);
+      const fees   = prices.map(p => 0.072 * p * (1-p) * 100);
+      this._charts.feeCurve = new Chart(el, {
+        type: 'line',
+        data: {
+          labels: prices.map(p=>p.toFixed(2)),
+          datasets: [{
+            label:'Taker Fee %',
+            data: fees,
+            borderColor:'#ffa657',
+            backgroundColor:'rgba(255,166,87,.08)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0,
+          }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.parsed.y.toFixed(2)+'%' } }
+          },
+          scales: {
+            x: { ticks:{color:'#8b949e', maxTicksLimit:10}, grid:{color:'#21262d'} },
+            y: { ticks:{color:'#8b949e', callback:v=>v.toFixed(1)+'%'}, grid:{color:'#21262d'},
+                 suggestedMax:4 }
+          }
+        }
+      });
+    },
+
+    // ── Formatters ───────────────────────────────────────────────────────────
+
+    fmt(v, signed=false) {
+      if (v == null) return '—';
+      const s = '$'+Math.abs(v).toFixed(2);
+      if (!signed) return s;
+      return (v >= 0 ? '+' : '-') + s;
+    },
+    pct(v) { return (v*100).toFixed(1)+'%'; },
+    ts(ms) { return ms ? new Date(ms).toLocaleString() : '—'; },
+  };
+}
+</script>
+</body>
+</html>
