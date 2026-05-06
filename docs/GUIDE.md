@@ -1,8 +1,8 @@
-# Polymarket Trade Engine -- Strategy Development Guide
+# Polymarket Trade Engine — Strategy Development Guide
 
-This document is the primary reference for developing strategies on the Polymarket binary prediction market trading engine. It covers the CLI interface, configuration, engine architecture, the strategy API, and best practices.
+This document is the primary reference for developing strategies on the Polymarket binary prediction market trading engine. It covers the CLI interface, configuration, engine architecture, the strategy API, the performance dashboard, and best practices.
 
-> **Upgrading from engine which uses clob-client v1?** See the [v2 Migration Guide](MIGRATE_V2.md) for the one-time USDC.e → pUSD wrap step required before running the engine.
+> **Upgrading from an engine that uses clob-client v1?** See the [v2 Migration Guide](MIGRATE_V2.md) for the one-time USDC.e → pUSD wrap step required before running the engine.
 
 ---
 
@@ -14,16 +14,19 @@ This document is the primary reference for developing strategies on the Polymark
 4. [Configuration](#configuration)
 5. [Engine Architecture](#engine-architecture)
 6. [Market Structure](#market-structure)
-7. [Strategy Interface](#strategy-interface)
-8. [StrategyContext API](#strategycontext-api)
-9. [Order Lifecycle](#order-lifecycle)
-10. [Utility Functions](#utility-functions)
-11. [PnL Computation](#pnl-computation)
-12. [State Persistence and Recovery](#state-persistence-and-recovery)
-13. [Best Practices](#best-practices)
-14. [Production Setup](#production-setup)
-15. [Redemption](#redemption)
-16. [Debugging and Visualization](#debugging-and-visualization)
+7. [Included Strategies](#included-strategies)
+8. [Strategy Interface](#strategy-interface)
+9. [StrategyContext API](#strategycontext-api)
+10. [Order Lifecycle](#order-lifecycle)
+11. [Utility Functions](#utility-functions)
+12. [PnL Computation](#pnl-computation)
+13. [State Persistence and Recovery](#state-persistence-and-recovery)
+14. [Performance Dashboard](#performance-dashboard)
+15. [Risk Gates](#risk-gates)
+16. [Best Practices](#best-practices)
+17. [Production Setup](#production-setup)
+18. [Redemption](#redemption)
+19. [Debugging and Visualization](#debugging-and-visualization)
 
 ---
 
@@ -36,32 +39,17 @@ The engine trades binary prediction markets on Polymarket. Each market asks whet
 ## Quick Start
 
 ```bash
-# Simulation mode -- 10 rounds with default strategy
-# See "Best Practices" section for why simulation matters
+# Simulation mode — 10 rounds with default strategy
 bun run index.ts --rounds 10
 
-# Simulation mode -- specific strategy, enter 2 slots ahead
-bun run index.ts --strategy simulation --slot-offset 2 --rounds 10
+# Simulation mode — specific strategy, enter 2 slots ahead
+bun run index.ts --strategy btc-gap-fade --slot-offset 2 --rounds 10
 
-# Production mode -- see the "Production Setup" section below
-# PRIVATE_KEY=0x... bun run index.ts --strategy simulation --prod
-```
+# Start the performance dashboard
+bun dashboard/server.ts
 
-### Included Strategies
-
-The repository ships with two strategies, both designed for simulation only. They are heavily commented and serve as the best starting point for understanding how the engine API works. Read through the source code carefully before writing your own.
-
-| Strategy | `--strategy` flag | File | Description |
-|----------|-------------------|------|-------------|
-| Simulation | `simulation` | `engine/strategy/simulation.ts` | Minimal example. Places a buy at 0.49 immediately, sells at 0.70 on fill, and emergency sells if the sell hasn't filled 30 seconds before market close. Demonstrates `postOrders`, callback chaining, `expireAtMs`, `emergencySells`, and the cleanup return pattern for clearing timers on destroy. |
-| Late Entry | `late-entry` | `engine/strategy/late-entry.ts` | Event-driven strategy that waits for indicator conditions (ATR, gap safety, divergence, peak gap ratio) before entering late in the market window. Demonstrates `ctx.hold()`, `setInterval`-based market ticking, indicator computation, stop-loss logic, and emergency exits. |
-
-```bash
-# Run the simulation strategy for 10 rounds
-bun run index.ts --strategy simulation --rounds 10
-
-# Run the late-entry strategy for 5 rounds
-bun run index.ts --strategy late-entry --rounds 5
+# Production mode — see the "Production Setup" section below
+# PRIVATE_KEY=0x... bun run index.ts --strategy <your-strategy> --prod
 ```
 
 ---
@@ -74,13 +62,14 @@ bun run index.ts [options]
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `-s, --strategy <name>` | string | First registered strategy | Strategy to run. |
-| `--slot-offset <n>` | positive integer | `1` | Which future market slot to pre-enter. `1` means the next upcoming slot, `2` means the slot after that. |
+| `-s, --strategy <name>` | string | `simulation` | Strategy to run. See [Included Strategies](#included-strategies) for all options. |
+| `--slot-offset <n>` | positive integer | `1` | Which future market slot to pre-enter. `1` = next slot, `2` = slot after that. |
 | `--prod` | boolean flag | `false` | Run against the real Polymarket CLOB. Requires `PRIVATE_KEY`. Prompts for confirmation unless `FORCE_PROD=true`. |
-| `--rounds <n>` | integer | unlimited | Number of market rounds to trade then exit. `0` means recover existing positions only (no new entries). Omit for unlimited. |
-| `--always-log` | boolean flag | `false` | Always write the per-market NDJSON log file even if no orders were placed (i.e. PnL is zero). Useful for debugging entry conditions and order book behavior in rounds where the strategy chose not to enter. |
+| `--dry-run` | boolean flag | `false` | Force simulation mode regardless of `--prod` and `SIMULATION_MODE`. |
+| `--rounds <n>` | integer | unlimited | Number of market rounds to trade then exit. `0` = recover existing positions only, no new entries. Omit for unlimited. |
+| `--always-log` | boolean flag | `false` | Always write the per-market NDJSON log file even when no orders were placed. Useful for debugging entry conditions in rounds where the strategy chose not to enter. |
 
-When `--prod` is confirmed, `process.env.PROD` is set to `"true"` so that strategies can check `Env.get("PROD")` at runtime.
+When `--prod` is confirmed, `process.env.PROD` is set to `"true"` so strategies can check `Env.get("PROD")` at runtime.
 
 ---
 
@@ -88,30 +77,49 @@ When `--prod` is confirmed, `process.env.PROD` is set to `"true"` so that strate
 
 ### Environment Variables
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `TICKER` | comma-separated list | `polymarket,coinbase` | Price sources for the asset ticker. Valid values: `polymarket`, `binance`, `coinbase`. |
-| `MARKET_ASSET` | string | `"btc"` | Asset to trade. Valid values: `btc`, `eth`, `xrp`, `sol`, `doge`. |
-| `MARKET_WINDOW` | string | `"5m"` | Market window duration. `"5m"` for 5-minute markets, `"15m"` for 15-minute markets. Set before starting the engine -- cannot be changed while running. |
-| `PROD` | boolean string | `"false"` | Set automatically by `--prod`. Do not set manually. |
-| `PRIVATE_KEY` | string | `""` | Polygon wallet private key. Required for production mode. |
-| `POLY_FUNDER_ADDRESS` | string | `""` | Address of the funding wallet on Polymarket. |
-| `WALLET_BALANCE` | string | `"50"` | Simulated wallet balance in USD for paper trading. |
-| `MAX_SESSION_LOSS` | string | `"3"` | Maximum cumulative session loss (in USD) before the engine auto-shuts down. |
-| `FORCE_PROD` | boolean string | `"false"` | Set to `"true"` to skip the interactive production confirmation prompt. |
+**Market Selection**
 
-### Config Type (utils/config.ts)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MARKET_ASSET` | `"btc"` | Asset to trade: `btc`, `eth`, `xrp`, `sol`, `doge`. |
+| `MARKET_WINDOW` | `"5m"` | Market window: `"5m"` (5-minute) or `"15m"` (15-minute). |
+| `TICKER` | `"polymarket,coinbase"` | Comma-separated price sources. Valid values: `polymarket`, `binance`, `coinbase`. |
 
-```ts
-type Config = {
-  TICKER: ("polymarket" | "binance" | "coinbase")[];
-  MARKET_WINDOW: "5m" | "15m";
-  MARKET_ASSET: "btc" | "eth" | "xrp" | "sol" | "doge";
-  PROD: boolean;
-  PRIVATE_KEY: string;
-  POLY_FUNDER_ADDRESS: string;
-};
-```
+**Trading**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROD` | `"false"` | Set automatically by `--prod`. Do not set manually. |
+| `PRIVATE_KEY` | — | Polygon wallet private key (with `0x` prefix). Required for production. |
+| `POLY_FUNDER_ADDRESS` | — | Polymarket proxy/funder address. Required for production. |
+| `WALLET_BALANCE` | `"50"` | Simulated wallet balance in USD for paper trading. |
+| `SIMULATION_MODE` | `"true"` | Master safety switch. Set to `"false"` only via `--prod`. |
+| `FORCE_PROD` | `"false"` | Skip the interactive production confirmation prompt. |
+
+**Risk Gates**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_SESSION_LOSS` | `"3"` | Maximum cumulative session loss in USD before auto-shutdown. |
+| `MAX_POSITION_PCT` | `"0.05"` | Maximum fraction of wallet per single trade (5%). |
+| `MAX_DRAWDOWN_PCT` | `"0.20"` | Maximum drawdown from starting balance before shutdown (20%). |
+| `DAILY_LOSS_LIMIT` | `"0"` | Daily loss cap in USD. `0` = disabled. Resets at UTC midnight. |
+
+**Simulation Realism**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SIM_PARTIAL_FILL_PROB` | `"0"` | Probability (0–1) of a partial fill. |
+| `SIM_SLIPPAGE_BPS` | `"0"` | Slippage in basis points (0–500). |
+| `SIM_LATENCY_JITTER_MS` | `"0"` | Random order latency in ms (0–2000). |
+| `SIM_NETWORK_FAIL_PROB` | `"0"` | Probability (0–0.5) of an order rejection. |
+
+**Performance Database**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PERF_DB` | `"false"` | Enable performance database recording (`state/performance.db`). |
+| `PERF_RECORD_TICKS` | `"false"` | Record per-second tick snapshots to the `ticks` table (verbose). |
 
 ---
 
@@ -124,13 +132,19 @@ The engine is composed of two core classes: **EarlyBird** and **MarketLifecycle*
 EarlyBird is the top-level engine loop. It:
 
 - Creates a new `MarketLifecycle` for each upcoming market slot, determined by `--slot-offset`.
-- Runs an internal engine tick every 100ms to drive lifecycle state transitions, order status polling, and state persistence. This is **not** a market tick. Market-level ticks (reacting to price changes, checking indicators, evaluating entry/exit conditions) are the responsibility of each strategy. See the `late-entry` strategy for an example of a strategy-driven market tick using `setInterval`.
+- Runs an internal engine tick every 100ms to drive lifecycle state transitions, order status polling, and state persistence. This is **not** a market tick. Market-level ticks (reacting to price changes, checking indicators, evaluating entry/exit conditions) are the responsibility of each strategy. See the `late-entry` and `btc-gap-fade` strategies for examples of strategy-driven market ticks using `setInterval`.
 - Tracks cumulative session PnL across all rounds.
-- Persists engine state to disk every 5 seconds:
-  - Simulation: `state/early-bird.json`
-  - Production: `state/early-bird-prod.json`
-- Auto-shuts down when the session loss limit (`MAX_SESSION_LOSS`) is reached or all requested rounds are complete.
+- Persists engine state to disk every 5 seconds.
+- Evaluates all risk gates after each completed round and auto-shuts down when a gate trips.
 - Handles `SIGINT` and `SIGTERM` for graceful shutdown.
+
+**State file paths** (per-strategy when launched from the dashboard):
+
+| Mode | Default path |
+|------|-------------|
+| Simulation | `state/early-bird.json` |
+| Production | `state/early-bird-prod.json` |
+| Dashboard-managed | `state/early-bird-<strategy>.json` |
 
 ### MarketLifecycle (engine/market-lifecycle.ts)
 
@@ -154,7 +168,6 @@ INIT --> RUNNING --> STOPPING --> DONE
 - Every tick (~100ms), processes all pending orders:
   - Checks if orders have been filled (via the CLOB API).
   - Checks if orders have expired (based on `expireAtMs`).
-  - Checks if orders have failed.
   - Fires the appropriate callback (`onFilled`, `onExpired`, `onFailed`).
 - Transitions to STOPPING when:
   - The slot time ends (`Date.now() >= slotEndMs`), OR
@@ -163,7 +176,7 @@ INIT --> RUNNING --> STOPPING --> DONE
 **STOPPING**
 
 1. Cancels any remaining buy orders.
-2. Continues processing pending sell orders each tick — fill and expiry callbacks (`onFilled`, `onExpired`) still fire normally during this phase.
+2. Continues processing pending sell orders each tick — fill and expiry callbacks still fire normally.
 3. If the slot expires with unfilled sells, cancels them.
 4. Computes PnL based on order history and market resolution.
 5. Transitions to DONE.
@@ -174,7 +187,7 @@ The lifecycle is complete. PnL is recorded to the session total and the lifecycl
 
 ### Timing Model
 
-Markets are 5-minute (300-second) slots. Each slot is identified by its end timestamp (`slotEndMs`). The market window opens at `slotEndMs - 300,000 ms`.
+Markets are 5-minute (300-second) slots. Each slot is identified by its end timestamp (`slotEndMs`). The market window opens at `slotEndMs - 300,000 ms` (`slotStartMs`).
 
 Because the engine runs with `--slot-offset >= 1`, the strategy function is invoked **before** the market opens. This gives the strategy time to analyze the order book and prepare orders before the market window begins.
 
@@ -193,7 +206,126 @@ Prices range from `0.00` to `1.00`, representing the implied probability of that
 
 **Example:** You buy 100 shares of UP at `0.49` each (cost: $49.00). If the asset finishes above the price to beat, each share resolves to `1.00` and you receive $100.00 (profit: $51.00). If it finishes below, the shares resolve to `0.00` (loss: $49.00).
 
-The market `slug` encodes the asset, market type, and slot end time. For example, `btc-updown-5m-1775241600` indicates a BTC up/down 5-minute market ending at Unix timestamp 1775241600. Change `MARKET_ASSET` to trade a different asset (e.g. `eth-updown-5m-1775241600` for ETH).
+The market `slug` encodes the asset, market type, and slot end time. For example, `btc-updown-5m-1775241600` indicates a BTC up/down 5-minute market ending at Unix timestamp 1775241600.
+
+---
+
+## Included Strategies
+
+Six strategies ship with the engine. All are designed for simulation first. Three include a hard production guard (`process.exit(1)` if `PROD=true`). Remove that guard only when you have validated the strategy and are prepared to risk real funds.
+
+### How to add a strategy
+
+1. Create `engine/strategy/your-strategy.ts`. Export:
+   - `yourStrategy: Strategy` — the main function
+   - `VERSION: string` — semver (e.g. `"1.0.0"`)
+   - `PARAMS_SCHEMA: ParamsSchema` — all env-var knobs with defaults (or `null`)
+2. Import and add entries to all three maps in `engine/strategy/index.ts`:
+   - `strategies["your-strategy"] = yourStrategy`
+   - `strategyVersions["your-strategy"] = VERSION`
+   - `strategyParamsSchemas["your-strategy"] = PARAMS_SCHEMA`
+3. Run `bun run check` to confirm no type errors.
+
+### Versioning
+
+Bump `VERSION` whenever the trading logic changes in a way that would produce different results on the same market data. The DB records `"name@version"` as the `strategy_id`, so version bumps create a clean split in the dashboard comparison panel. Changing only env-var defaults does not require a version bump.
+
+### simulation (1.0.0)
+
+**File:** `engine/strategy/simulation.ts` | **Sim only**
+
+Minimal reference implementation. Places a GTC buy at 0.49 immediately, places a GTC sell at 0.70 on fill, and emergency sells if the sell hasn't filled 30 seconds before market close. Read this strategy first — every API feature is demonstrated here.
+
+```bash
+bun run index.ts --strategy simulation --rounds 10
+```
+
+### late-entry (1.0.0)
+
+**File:** `engine/strategy/late-entry.ts`
+
+Indicator-driven strategy. Waits for multiple confirmation signals before entering late in the market window (ATR volatility gate, gap safety ratio, PGR momentum check, cross-source price divergence). Demonstrates `ctx.hold()`, timer-based indicator polling, and stop-loss logic.
+
+```bash
+bun run index.ts --strategy late-entry --rounds 5
+```
+
+### momentum-imbalance (1.0.0)
+
+**File:** `engine/strategy/momentum-imbalance.ts`
+
+Combines spot price momentum with order-book imbalance and liquidity checks. Includes a mean-reversion fallback when momentum is ambiguous. Demonstrates multi-signal entry filtering and position management.
+
+```bash
+bun run index.ts --strategy momentum-imbalance --rounds 5
+```
+
+### btc-gap-fade (1.1.0)
+
+**File:** `engine/strategy/btc-gap-fade.ts` | **Sim only**
+
+Gap mean-reversion strategy. Hypothesis: BTC gaps hard at slot open but tends to revert toward the open price. Buys the losing token while the gap is fading.
+
+**Entry:** 100–160s before close. Gap must exceed `BGF_GAP_THRESHOLD`, have faded ≥ `(1 - BGF_FADE_RATIO)` from its peak (PGR check), and ATR must exceed `BGF_MIN_ATR`.
+
+**Exit:** GTC take-profit at `BGF_TAKE_PROFIT_PRICE`, expiring 40s before close. Review timer checks for gap re-expansion at `BGF_REVIEW_AT_SECS`. Hard stop at `BGF_STOP_AT_SECS`.
+
+**Configurable params** (all via env vars):
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `BGF_GAP_THRESHOLD` | `20` | Min absolute BTC gap ($) to trigger entry |
+| `BGF_FADE_RATIO` | `0.70` | PGR ceiling — enter when gap has faded below this fraction of peak |
+| `BGF_MIN_ATR` | `3` | Min ATR required for entry |
+| `BGF_TAKE_PROFIT_PRICE` | `0.55` | GTC take-profit sell price |
+| `BGF_STOP_AT_SECS` | `30` | Hard stop: emergency exit this many seconds before close |
+| `BGF_REVIEW_AT_SECS` | `45` | Review: check gap re-expansion this many seconds before close |
+| `BGF_ENTRY_MIN_SECS` | `100` | Entry window open (seconds before close) |
+| `BGF_ENTRY_MAX_SECS` | `160` | Entry window close (seconds before close) |
+| `BGF_POSITION_SHARES` | `5` | USDC budget (shares = floor(budget / askPrice)) |
+
+```bash
+bun run index.ts --strategy btc-gap-fade --rounds 10
+```
+
+### passive-maker
+
+**File:** `engine/strategy/passive-maker.ts`
+
+Passive market-making strategy. Places resting limit orders on both sides and collects the spread. Fully configurable via `PM_*` environment variables. Suitable for low-volatility markets where spread is predictable.
+
+```bash
+bun run index.ts --strategy passive-maker --rounds 5
+```
+
+### multi-level-ofi (1.1.0)
+
+**File:** `engine/strategy/multi-level-ofi.ts` | **Sim only**
+
+Multi-level Order Flow Imbalance strategy. Computes weighted OFI across the top 3 order book levels (weights: 1.0, 0.7, 0.4). Entry also requires a BTC dislocation gate: BTC must have moved meaningfully in the last 30 seconds, in the same direction as the OFI signal, AND the token price must not yet reflect that move.
+
+**Entry:** FOK (immediate fill or reject). Only enters in fee-safe zones (price < `MLOFI_FEE_SAFE_MAX` or > `MLOFI_FEE_SAFE_MIN`) to keep taker fees manageable.
+
+**Exit:** GTC take-profit at `MLOFI_TAKE_PROFIT_PCT` above entry. Stop-loss triggered when best bid drops below `MLOFI_STOP_LOSS_PCT`. Emergency exit 20s before close.
+
+**Configurable params** (all via env vars):
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `MLOFI_OFI_THRESHOLD` | `20` | Min weighted OFI magnitude to consider signal |
+| `MLOFI_DISLOC_BTC_PCT` | `0.0002` | Min BTC % move in 30s to count as dislocation |
+| `MLOFI_DISLOC_TOKEN_GAP` | `0.02` | Min token mispricing vs fair value |
+| `MLOFI_FEE_SAFE_MAX` | `0.40` | Upper bound of lower fee-safe zone |
+| `MLOFI_FEE_SAFE_MIN` | `0.60` | Lower bound of upper fee-safe zone |
+| `MLOFI_TAKE_PROFIT_PCT` | `0.20` | Take-profit % above entry price |
+| `MLOFI_STOP_LOSS_PCT` | `0.30` | Stop-loss % below entry price |
+| `MLOFI_MIN_REMAINING_S` | `30` | Don't enter with fewer seconds remaining |
+| `MLOFI_MAX_REMAINING_S` | `240` | Don't enter with more seconds remaining |
+| `MLOFI_POSITION_SHARES` | `5` | USDC budget for the position |
+
+```bash
+bun run index.ts --strategy multi-level-ofi --rounds 10
+```
 
 ---
 
@@ -205,18 +337,17 @@ A strategy is a single async function with the following signature:
 type Strategy = (ctx: StrategyContext) => Promise<(() => void) | void>;
 ```
 
-The function is called **once** per market round, after the INIT phase completes (order book is ready, token IDs are resolved). All subsequent logic is driven by callbacks on orders. This is an **event-driven model** -- the strategy function sets up initial orders and callback chains, then returns.
+The function is called **once** per market round, after the INIT phase completes (order book is ready, token IDs are resolved). All subsequent logic is driven by callbacks on orders. This is an **event-driven model** — the strategy function sets up initial orders and callback chains, then returns.
 
 ### Cleanup Function
 
-The strategy may optionally return a cleanup function. The engine calls it when the lifecycle is destroyed -- whether the trade completed early or the slot ended. Use it to clear any `setTimeout` or `setInterval` handles the strategy created, preventing stale callbacks from firing after the lifecycle is gone.
+The strategy may optionally return a cleanup function. The engine calls it when the lifecycle is destroyed — whether the trade completed early or the slot ended. Use it to clear any `setTimeout` or `setInterval` handles the strategy created.
 
 ```ts
 export const myStrategy: Strategy = async (ctx) => {
   const intervals: NodeJS.Timeout[] = [];
   const timeouts: NodeJS.Timeout[] = [];
 
-  // ... set up orders, signals, timers ...
   timeouts.push(setTimeout(() => { /* ... */ }, delay));
   intervals.push(setInterval(() => { /* ... */ }, 500));
 
@@ -239,88 +370,68 @@ The `StrategyContext` object is the sole interface between your strategy and the
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `slug` | `string` | Market identifier (e.g. `"btc-updown-5m-1775241600"` or `"btc-updown-15m-1775241600"`). |
-| `slotStartMs` | `number` | Unix timestamp in milliseconds when the market opens. Use `slotEndMs - slotStartMs` to determine the window duration (300,000 for 5m, 900,000 for 15m). |
-| `slotEndMs` | `number` | Unix timestamp in milliseconds when the market closes. |
+| `slug` | `string` | Market identifier (e.g. `"btc-updown-5m-1775241600"`). |
+| `slotStartMs` | `number` | Unix ms when the market opens. |
+| `slotEndMs` | `number` | Unix ms when the market closes. |
 | `clobTokenIds` | `[string, string]` | Token IDs: index 0 is UP, index 1 is DOWN. |
 | `orderBook` | `OrderBook` | Live order book instance (see below). |
 | `log` | `(msg: string, color?: LogColor) => void` | Log messages to engine output. |
-| `pendingOrders` | `PendingOrder[]` | Live reference to the array of currently pending orders. |
-| `orderHistory` | `Array<{ action: "buy" \| "sell"; price: number; shares: number }>` | Array of completed (filled) orders. |
+| `pendingOrders` | `PendingOrder[]` | Live reference to currently pending orders. |
+| `orderHistory` | `Array<{ action: "buy" \| "sell"; price: number; shares: number }>` | Completed (filled) orders. |
 | `ticker` | `TickerTracker` | Live asset price tracker (see below). |
 
 ### Methods
 
 #### ctx.postOrders(orders: OrderRequest[])
 
-Fire-and-forget order placement. Returns immediately -- do **not** use the return value to determine if an order was placed. The engine handles placement asynchronously with automatic retries on balance errors (up to 30 retries for buys, unlimited retries for sells until slot end).
+Fire-and-forget order placement. Returns immediately. The engine handles placement asynchronously with automatic retries on balance errors (up to 30 retries for buys, unlimited retries for sells until slot end). React to outcomes via callbacks on each `OrderRequest`.
 
-Orders are silently dropped if the corresponding action type is blocked (see `blockBuys` / `blockSells`).
-
-React to outcomes via callbacks on each `OrderRequest`:
-
-| Callback | Signature | When it fires |
-|----------|-----------|---------------|
-| `onFilled` | `(filledShares: number) => void` | Order fully matched on the CLOB, or expired with a partial match (unmatched remainder discarded). `filledShares` may be less than requested: GTC fills split across multiple counterparties lose a few units to on-chain integer truncation; FOK fills are reduced by the taker fee. Always use this value instead of the originally requested share count. |
-| `onExpired` | `() => void` | Order was auto-cancelled because its expiration deadline was reached **and no shares were matched**. Each order carries an `expireAtMs` timestamp (Unix milliseconds); the engine checks this on every tick and cancels the order once the current time passes it. Set this strategically -- for example, expire sell orders 30 seconds before slot end to leave time for an emergency exit in this callback. |
-| `onFailed` | `(reason: string) => void` | Order was not placed or was cancelled by the exchange. |
-
-Callbacks may call `ctx.postOrders()` again to chain further orders.
+| Callback | When it fires |
+|----------|---------------|
+| `onFilled(filledShares)` | Order fully matched, or expired with a partial match. Always use `filledShares` — never the originally requested count. |
+| `onExpired()` | `expireAtMs` was reached with no shares matched. |
+| `onFailed(reason)` | Order was not placed or was cancelled by the exchange. FOK rejections fire immediately with no retry. |
 
 #### ctx.cancelOrders(orderIds: string[]): Promise\<CancelOrderResponse\>
 
-Cancels orders in batch. Returns an object with:
-- `canceled`: array of successfully cancelled order IDs.
-- `not_canceled`: map of order IDs that could not be cancelled, with reasons.
-
-Only removes pending orders that were actually cancelled from the internal tracking.
+Cancels orders in batch. Returns `{ canceled, not_canceled }`.
 
 #### ctx.emergencySells(orderIds: string[]): Promise\<void\>
 
-Last-resort exit mechanism. Cancels the specified pending sell orders and re-places them as FOK orders at the current best bid price for instant execution. Bypasses any active sell-block.
-
-If a FOK sell is rejected (bid moved between the best-bid read and order submission), the engine automatically retries with a fresh best bid read, looping until the order fills or the slot ends. Each retry waits 100ms before re-reading the bid.
-
-Use this when a limit sell has not filled and time is running out.
+Last-resort exit. Cancels the specified pending sell orders and re-places them as FOK orders at the current best bid price. Bypasses any active sell-block. Automatically retries (with a fresh bid read) if the FOK is rejected.
 
 #### ctx.getOrderById(orderId: string): Promise\<Order | null\>
 
-Fetches the full order object from the CLOB API by ID.
+Fetches the full order object from the CLOB by ID.
 
 #### ctx.hold(): () => void
 
-Returns a `release` function. While any hold is active, the lifecycle will **not** transition out of RUNNING, even if there are no pending orders or in-flight placements. This is essential for strategies that wait for external conditions before placing orders (e.g. watching for a price level, polling indicators on a timer).
-
-The lifecycle stays in RUNNING until **all** active holds are released. Call `release()` exactly once when your strategy logic is complete.
-
-**Warning:** Forgetting to call `release()` will cause the engine to hang indefinitely after the market closes.
-
-Implementation detail: `hold()` increments an internal `_strategyLocks` counter. `release()` decrements it (with a guard against double-release). The RUNNING state checks: if `pendingOrders.length === 0 && inFlight === 0 && strategyLocks === 0`, it transitions to STOPPING.
+Returns a `release` function. While any hold is active, the lifecycle will not transition out of RUNNING, even if there are no pending orders. Essential for strategies that watch for conditions before entering. Call `release()` exactly once when done. Forgetting to release causes the engine to hang indefinitely.
 
 #### ctx.blockBuys()
 
-Permanently prevents further buy orders from being placed for this market round. Any subsequent `postOrders()` calls with `action: "buy"` are silently dropped. Also stops in-progress buy retries.
+Permanently prevents further buy orders for this round. In-progress buy retries are also stopped.
 
 #### ctx.blockSells()
 
-Permanently prevents further sell orders from being placed for this market round. Any subsequent `postOrders()` calls with `action: "sell"` are silently dropped. Also stops in-progress sell retries. Note that `emergencySells` bypasses this block.
+Permanently prevents further sell orders for this round. `emergencySells` bypasses this block.
 
 #### ctx.getMarketResult(): MarketData | undefined
 
-Returns `{ openPrice, closePrice }` when available. `openPrice` is the asset price at market open (the "price to beat"). `closePrice` is set after market resolution. Returns `undefined` before market data is available.
+Returns `{ openPrice, closePrice }` when available. `openPrice` is the asset price at market open (the "price to beat"). Returns `undefined` before market data is available.
 
 ### OrderRequest
 
 ```ts
 type OrderRequest = {
   req: {
-    tokenId: string;        // Use clobTokenIds[0] for UP, clobTokenIds[1] for DOWN
+    tokenId: string;
     action: "buy" | "sell";
-    price: number;          // Between 0.00 and 1.00
-    shares: number;         // Number of shares
-    orderType?: "GTC" | "FOK";  // Default: "GTC"
+    price: number;          // 0.00 – 1.00
+    shares: number;
+    orderType?: "GTC" | "FOK";  // default: "GTC"
   };
-  expireAtMs: number;       // Unix ms -- engine auto-cancels after this time
+  expireAtMs: number;       // Unix ms — engine auto-cancels after this time
   onFilled?: (filledShares: number) => void;
   onExpired?: () => void;
   onFailed?: (reason: string) => void;
@@ -329,62 +440,39 @@ type OrderRequest = {
 
 #### Order Types
 
-| Type | Name | Behavior |
-|------|------|----------|
-| `"GTC"` | Good-Till-Cancelled | Default. Order rests on the book until filled, expired (`expireAtMs`), or cancelled. You are the **maker** -- no taker fees are charged. |
-| `"FOK"` | Fill-or-Kill | Must fill immediately and in full at the requested price, or be rejected instantly. Never rests on the book. You are the **taker** -- taker fees apply (see below). |
+| Type | Behaviour | Fees |
+|------|-----------|------|
+| `"GTC"` | Rests on the book until filled, expired, or cancelled. You are the maker. | No taker fee |
+| `"FOK"` | Must fill immediately and in full, or be rejected instantly. You are the taker. | Taker fee applies |
 
-**GTC** is appropriate for most strategies. The order sits on the book as a limit order and waits for the market to come to it. Because GTC orders rest on the book, they are maker orders and Polymarket does not charge fees on them.
-
-**FOK** is appropriate when you need immediate execution certainty -- for example, entering at a specific ask level where you want to guarantee the fill happens right now or not at all. If the order cannot be fully matched at placement time, `onFailed` fires immediately with reason `"order couldn't be fully filled. FOK orders are fully filled or killed."` No retry is attempted for this rejection (balance retries still apply if the wallet is not yet ready).
-
-**FOK fees:** FOK orders are taker orders and incur a fee calculated as `fee = shares × feeRate × price × (1 - price)`, where `feeRate` is category-specific (e.g. 0.072 for crypto markets). On buy orders, the fee is deducted in shares -- you receive fewer shares than `size_matched` reports. On sell orders, the fee is deducted in USDC from the proceeds. The engine automatically adjusts `filledShares` in `onFilled` to reflect the net shares after fees, so strategies can use the value directly without manual fee calculations. See the [Polymarket fee documentation](https://docs.polymarket.com/trading/fees#fee-structure) for current rates by category.
-
-```ts
-// FOK buy: fill immediately at 0.59 or fail
-ctx.postOrders([{
-  req: { tokenId: ctx.clobTokenIds[0], action: "buy", price: 0.59, shares: 6, orderType: "FOK" },
-  expireAtMs: ctx.slotEndMs,
-  onFilled: (filledShares) => {
-    ctx.log(`FOK buy filled: ${filledShares} shares`);
-  },
-  onFailed: (reason) => {
-    ctx.log(`FOK buy rejected: ${reason}`); // price moved before fill
-  },
-}]);
-```
+**FOK fees:** `fee = shares × feeRate × price × (1 - price)`. The engine adjusts `filledShares` in `onFilled` to reflect net shares after fees, so strategies can use the value directly.
 
 ### OrderBook
 
-Live order book for the current market. Key methods:
-
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `bestAskInfo` | `(side: "UP" \| "DOWN") => { price: number; liquidity: number } \| null` | Best ask price and available liquidity. |
-| `bestBidPrice` | `(side: "UP" \| "DOWN") => number \| null` | Best bid price. |
-| `bestBidInfo` | `(side: "UP" \| "DOWN") => { price: number; liquidity: number } \| null` | Best bid price and available liquidity. |
+| `bestAskInfo` | `(side) => { price, liquidity } \| null` | Best ask price and available liquidity. |
+| `bestBidPrice` | `(side) => number \| null` | Best bid price. |
+| `bestBidInfo` | `(side) => { price, liquidity } \| null` | Best bid price and available liquidity. |
+| `getSnapshotData` | `() => { up: BookSnapshot; down: BookSnapshot } \| null` | Full top-3 levels for OFI computation. |
 
 ### TickerTracker
 
-Live asset price tracker aggregating data from multiple sources.
-
 | Property | Type | Description |
 |----------|------|-------------|
-| `price` | `number \| undefined` | Current asset price aggregated across all configured sources. `undefined` if not yet available. |
-| `binancePrice` | `number \| undefined` | Raw asset price from Binance. `undefined` if Binance is not configured or not yet ready. |
-| `coinbasePrice` | `number \| undefined` | Raw asset price from Coinbase. `undefined` if Coinbase is not configured or not yet ready. |
+| `price` | `number \| undefined` | Current asset price aggregated across all configured sources. |
+| `binancePrice` | `number \| undefined` | Raw price from Binance. |
+| `coinbasePrice` | `number \| undefined` | Raw price from Coinbase. |
 | `divergence` | `number \| null` | Price divergence across configured sources. |
 
 ### PendingOrder
-
-Each entry in `ctx.pendingOrders` contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `orderId` | `string` | Unique order identifier. |
 | `tokenId` | `string` | CLOB token ID. |
 | `action` | `"buy" \| "sell"` | Order side. |
-| `orderType` | `"GTC" \| "FOK" \| undefined` | Order type. `undefined` means GTC. |
+| `orderType` | `"GTC" \| "FOK" \| undefined` | Order type. |
 | `price` | `number` | Limit price. |
 | `shares` | `number` | Number of shares. |
 | `expireAtMs` | `number` | Expiration timestamp in Unix ms. |
@@ -392,8 +480,6 @@ Each entry in `ctx.pendingOrders` contains:
 ---
 
 ## Order Lifecycle
-
-The following diagram illustrates the lifecycle of a single order from placement to resolution:
 
 ```
 postOrders([order])
@@ -424,58 +510,32 @@ postOrders([order])
                         (rejection returns no orderId — handled above)
 ```
 
-Key points:
-- Buy orders are retried up to 30 times on balance errors.
-- Sell orders are retried without limit until the slot ends.
-- Blocked action types are silently dropped before reaching the queue.
-- FOK rejections fire `onFailed` immediately and are never retried (balance retries still apply before placement).
-
 ---
 
 ## Utility Functions
 
-The following helpers are available from `engine/strategy/utils.ts`.
+Available from `engine/strategy/utils.ts`.
 
 ### waitForAsk(ctx, side, targetPrice, onReached, pollMs?)
 
-Polls the order book every `pollMs` milliseconds (default: 100) until the best ask on the specified `side` reaches or exceeds `targetPrice`. When the condition is met, calls `onReached(price)`.
+Polls the order book every `pollMs` milliseconds (default: 100) until the best ask on `side` reaches or exceeds `targetPrice`. Calls `onReached(price)` when the condition is met. Returns a `PriceSignal` with a `cancel()` method.
 
-Returns a `PriceSignal` object with a `cancel()` method to abort the wait.
-
-**Why this exists:** Polymarket operates on a "lift the ask" model. If the current best ask is 0.40 and you place a limit buy at 0.45, the order fills immediately at 0.40 and you eat the spread -- you pay 0.45 but could have paid 0.40. A naive limit order above the current ask gives away value. `waitForAsk` solves this by watching the order book passively until the ask naturally rises to your target price, and only then placing the order. This lets you track an upward trend without overpaying: you confirm the price has moved to where you want it before committing capital.
-
-```ts
-const signal = waitForAsk(ctx, "UP", 0.55, (price) => {
-  ctx.log(`UP ask reached ${price}, placing order`);
-  // Place orders here
-});
-
-// To abort:
-signal.cancel();
-```
+**Why this exists:** On a CLOB, placing a limit buy above the current ask fills immediately at the ask — you pay your limit price but could have paid the ask. `waitForAsk` watches passively until the ask naturally rises to your target price, ensuring you don't overpay.
 
 ### waitForBid(ctx, side, targetPrice, onReached, pollMs?)
 
-Polls the order book every `pollMs` milliseconds (default: 100) until the best bid on the specified `side` drops to or below `targetPrice`. When the condition is met, calls `onReached(price)`.
+Polls until the best bid on `side` drops to or below `targetPrice`. Returns a `PriceSignal` with `cancel()`.
 
-Returns a `PriceSignal` object with a `cancel()` method to abort the wait.
-
-**Why this exists:** The inverse of the ask problem applies to sells. If the current best bid is 0.60 and you place a limit sell at 0.55, the order fills immediately at 0.60 -- but you signaled willingness to accept 0.55, which on a thin book could result in partial fills at worse prices. `waitForBid` watches the order book passively until the bid drops to your target level, confirming a downward move before you act. This is useful for stop-loss logic: rather than placing a standing limit sell that might fill prematurely during normal fluctuation, you wait for the bid to actually reach your stop level before committing the exit.
+**Why this exists:** For stop-loss logic — rather than a standing limit sell that might fill prematurely during normal fluctuation, watch passively until the bid actually reaches your stop level before committing the exit.
 
 ---
 
 ## PnL Computation
 
-The engine computes PnL for each market round as follows:
-
-1. **Order-based PnL**: Sum all sell proceeds (credits) and subtract all buy costs (debits) from the order history. Taker fees (from FOK orders) are subtracted from PnL for both buy and sell fills.
-2. **Resolution-based PnL**: For any shares still held at market close, resolve based on the market outcome:
-   - Winning side shares resolve at `1.00` per share.
-   - Losing side shares resolve at `0.00` per share.
+1. **Order-based PnL**: Sum sell proceeds (credits) minus buy costs (debits). Taker fees (FOK orders) are subtracted for both buy and sell fills.
+2. **Resolution-based PnL**: Shares held at market close resolve at `1.00` (winning side) or `0.00` (losing side).
 3. **Session PnL**: Accumulated across all rounds in the session.
-4. **Session Loss**: Tracked separately from session PnL. Only losing rounds (negative PnL) contribute to this counter -- winning rounds do not offset it. This means a session that wins $5 then loses $3 has a session PnL of +$2 but a session loss of -$3.
-
-The engine auto-shuts down when the cumulative session loss reaches `-MAX_SESSION_LOSS`, regardless of how much profit was made in other rounds. This prevents a scenario where a string of wins masks a deteriorating strategy that is consistently giving back gains.
+4. **Session Loss**: Tracked separately. Only losing rounds contribute — winning rounds do not offset it. A session that wins $5 then loses $3 has session PnL of +$2 but session loss of -$3.
 
 ---
 
@@ -483,26 +543,85 @@ The engine auto-shuts down when the cumulative session loss reaches `-MAX_SESSIO
 
 ### State Snapshots
 
-The engine persists its state to disk every 5 seconds:
-
-| Mode | State File |
-|------|-----------|
-| Simulation | `state/early-bird.json` |
-| Production | `state/early-bird-prod.json` |
-
-Each snapshot includes session PnL, session loss, all active market lifecycles (with their pending orders and order history), and completed market results.
+The engine persists its state to disk every 5 seconds. State includes session PnL, session loss, daily loss bucket, wallet balance, all active market lifecycles (with pending orders and order history), and completed market results.
 
 ### Graceful Shutdown
 
-The engine is designed to never abandon open positions. When a shutdown is triggered -- whether by `SIGINT` (Ctrl+C), `SIGTERM`, the session loss limit, or round exhaustion -- the engine does not exit immediately. Instead, it signals all active lifecycles to begin winding down. Lifecycles in the INIT state are discarded, but any lifecycle that has already reached RUNNING transitions to STOPPING, where it cancels pending buy orders and waits for open sell orders to fill before computing PnL and marking itself as DONE. The engine only exits once every lifecycle has fully settled.
+When shutdown is triggered — by `SIGINT`, `SIGTERM`, a risk gate, or round exhaustion — the engine does not exit immediately. It signals all active lifecycles to wind down. Lifecycles in INIT are discarded; lifecycles in RUNNING transition to STOPPING, where buy orders are cancelled and sell orders are polled until filled or the slot ends. The engine exits only once every lifecycle has settled.
 
-This means that if you press Ctrl+C while a sell order is still open on the exchange, the engine will hold the process alive and continue polling that order until it fills, expires, or the slot ends. If the slot ends with a sell still unfilled, the engine cancels it and lets the position resolve at market close (winning side pays 1.00, losing side pays 0.00). At no point does the engine silently drop an order or exit with untracked positions.
+If the slot ends with a sell still unfilled, the engine cancels it and lets the position resolve at market close.
 
 ### Crash Recovery
 
-If the engine crashes or is forcefully killed (e.g. `kill -9`), state recovery handles the gap. On the next startup, the engine loads the most recent state snapshot from disk and resumes tracking any pending orders that were active at the time of the crash. The orders themselves remain live on the Polymarket CLOB regardless of whether the engine is running -- the recovery process reconnects to them by ID and continues monitoring for fills and expirations.
+If the engine crashes or is forcefully killed, state recovery handles the gap on the next startup. The engine loads the most recent state snapshot and resumes tracking any pending orders that were active at the time of the crash. Orders remain live on the Polymarket CLOB regardless of whether the engine is running — recovery reconnects to them by ID.
 
-However, callbacks registered by the strategy are not persisted, so any logic that was waiting inside an `onFilled` or `onExpired` handler will not fire for recovered orders. The engine will still cancel or settle them correctly, but chained strategy logic (such as placing a sell after a buy fills) will not resume. Design strategies with this in mind: the engine guarantees order-level safety, not callback-level continuity.
+Callbacks are not persisted. Any logic waiting inside an `onFilled` or `onExpired` handler will not fire for recovered orders. Design strategies with this in mind.
+
+---
+
+## Performance Dashboard
+
+```bash
+bun dashboard/server.ts
+# or
+DASHBOARD_PORT=3001 bun dashboard/server.ts
+```
+
+Opens at `http://localhost:3000`. The dashboard reads `state/performance.db` in readonly mode (it can never mutate engine state). Enable DB recording with `PERF_DB=true` (set automatically when launching engines from the dashboard).
+
+### Tabs
+
+**Live**
+- Real-time session PnL and wallet balance (polled every 3s from state files)
+- Active markets and completed round feed
+- Engine start/stop controls for each strategy (spawns child processes)
+- Current session from the performance DB
+
+**Projections**
+- Monte Carlo simulation (1000 paths, 12 trades/day)
+- Fan chart showing p10/p50/p90 cumulative PnL over 1d, 1w, 1m, 3m, 6m, 1y, 3y
+- Kelly fraction and quarter-Kelly position sizing
+- Break-even win rate
+- Confidence level (high: ≥30 rounds bootstrap, low: <30 rounds Bernoulli)
+
+**Rounds**
+- Paginated round history with strategy and outcome filtering
+- Detail modal showing entry reason JSON, fill prices, fees, PnL
+
+**Config**
+- Live `.env` editor (whitelisted keys only)
+- Changes are written to disk and take effect on the next engine start
+
+### API Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/strategies` | All registered strategies with stats |
+| GET | `/api/rounds` | Paginated round history (filters: strategy, from, to, outcome, limit, offset) |
+| GET | `/api/performance` | Stats grouped by period (daily/weekly/monthly/3m/6m/1y/3y) |
+| GET | `/api/equity-curve` | Cumulative PnL series for charting |
+| GET | `/api/live` | Current session + state file data + engine statuses |
+| GET | `/api/compare` | Side-by-side strategy comparison with Sharpe approximation |
+| GET | `/api/projections` | Monte Carlo input + results + Kelly + break-even |
+| GET/POST | `/api/engines` | List, start, or stop per-strategy engine processes |
+| GET/POST | `/api/config` | Read or write whitelisted `.env` keys |
+
+---
+
+## Risk Gates
+
+All gates are evaluated after each completed round. Tripping any gate triggers a graceful shutdown.
+
+| Gate | Env Var | Default | When it trips |
+|------|---------|---------|---------------|
+| Session loss | `MAX_SESSION_LOSS` | `$3` | Cumulative negative PnL ≥ threshold |
+| Max drawdown | `MAX_DRAWDOWN_PCT` | `20%` | `(initialBalance - currentBalance) / initialBalance ≥ threshold` |
+| Daily loss | `DAILY_LOSS_LIMIT` | `$0` (off) | Cumulative daily negative PnL ≥ limit. Persists across restarts. Resets at UTC midnight. |
+| Max position | `MAX_POSITION_PCT` | `5%` | Single order cost / wallet balance > threshold (blocks order, not shutdown) |
+
+**Startup checks:** If the previous session already tripped `MAX_SESSION_LOSS` or `DAILY_LOSS_LIMIT` when the engine starts, it exits immediately with an explanation and instructions for resetting.
+
+To reset between sessions, set `sessionLoss` to `0` in the state file, or increase `MAX_SESSION_LOSS` in `.env`.
 
 ---
 
@@ -510,35 +629,31 @@ However, callbacks registered by the strategy are not persisted, so any logic th
 
 ### General
 
-- **Always test in simulation first.** Run at least 10 rounds (`--rounds 10`) before enabling production mode. Simulation uses a paper wallet controlled by the `WALLET_BALANCE` environment variable. The simulation environment mirrors real Polymarket behavior: it uses real order book data, simulates network delays and failures, and handles partial fills exactly how the exchange does. The goal is for a strategy that works in simulation to behave identically in production. Do not skip this step. Even a strategy that looks correct in code can behave unexpectedly against a live order book with real spread, slippage, and fill timing.
-- **The strategy function is called once per market.** All subsequent logic must be driven by callbacks. Do not use long-running loops inside the strategy function -- use `ctx.hold()` combined with timer-based or event-based patterns instead.
-- **Return a cleanup function if your strategy creates timers.** Any `setTimeout` or `setInterval` handles should be tracked and cleared in a returned cleanup function. The engine calls it when the lifecycle is destroyed, preventing stale callbacks from firing after the market round is over.
+- **Always test in simulation first.** Run at least 10 rounds (`--rounds 10`) before enabling production mode. The simulation environment uses real order book data and mirrors Polymarket behavior including spread, partial fills, and fill timing.
+- **The strategy function is called once per market.** All subsequent logic must be driven by callbacks. Do not use long-running loops inside the strategy function — use `ctx.hold()` combined with timer-based or event-based patterns.
+- **Return a cleanup function if your strategy creates timers.** Clear all `setTimeout` and `setInterval` handles in the returned function. The engine calls it when the lifecycle is destroyed.
 
 ### Order Management
 
-- **Always use `filledShares` from `onFilled`, never the original requested shares.** Partial fills are possible, and the filled amount may differ from what you requested.
-- **Set `expireAtMs` strategically.** For sell orders, expire them 20-30 seconds before `slotEndMs` so that `onExpired` has time to trigger emergency sells before the market closes.
-- **Use `ctx.hold()` for event-driven strategies.** Without it, the lifecycle transitions to STOPPING as soon as the strategy function returns and no orders are pending. Always call the returned `release()` function when your strategy logic is complete.
+- **Always use `filledShares` from `onFilled`, never the original requested shares.** Partial fills are possible, and FOK fills are reduced by taker fees.
+- **Set `expireAtMs` strategically.** For sell orders, expire them 20–40 seconds before `slotEndMs` so `onExpired` has time to trigger emergency sells before close.
+- **Use `ctx.hold()` for event-driven strategies.** Without it, the lifecycle transitions to STOPPING as soon as the strategy function returns and no orders are pending.
 
 ### Callback Chaining
-
-Callbacks may call `ctx.postOrders()` to chain further actions. A common pattern:
 
 ```ts
 ctx.postOrders([{
   req: { tokenId: ctx.clobTokenIds[0], action: "buy", price: 0.49, shares: 100 },
   expireAtMs: ctx.slotEndMs - 60_000,
   onFilled: (filledShares) => {
-    // Immediately place a sell after the buy fills
     ctx.postOrders([{
       req: { tokenId: ctx.clobTokenIds[0], action: "sell", price: 0.55, shares: filledShares },
       expireAtMs: ctx.slotEndMs - 30_000,
       onExpired: () => {
-        // Sell did not fill in time -- emergency exit
-        const sellOrderIds = ctx.pendingOrders
+        const sellIds = ctx.pendingOrders
           .filter(o => o.action === "sell")
           .map(o => o.orderId);
-        ctx.emergencySells(sellOrderIds);
+        ctx.emergencySells(sellIds);
       },
     }]);
   },
@@ -547,92 +662,85 @@ ctx.postOrders([{
 
 ### Risk Management
 
-- **Use `ctx.blockBuys()` to prevent new entries** after a stop-loss condition or when you have reached your desired position size.
-- **Use `ctx.emergencySells()` as a last resort** when limit sells have not filled and the slot is about to end. It re-places at the best bid for immediate execution.
-- **Monitor `ctx.pendingOrders`** to keep track of what is still open. Use this to find order IDs for cancellation or emergency selling.
+- Use `ctx.blockBuys()` to prevent new entries after a stop-loss condition.
+- Use `ctx.emergencySells()` as a last resort when limit sells have not filled and the slot is about to end.
+- Monitor `ctx.pendingOrders` to track open orders by ID for cancellation or emergency selling.
+- Set `MAX_SESSION_LOSS` to an amount you are comfortable losing in a single session.
 
 ### Resilience
 
-- **Design for restarts.** Callbacks are not persisted. If the engine crashes and recovers, pre-crash orders will be tracked but their callbacks will not fire. Avoid designs where the only exit path is a callback chain.
-- **Respect the session loss limit.** The engine will auto-shut down when cumulative PnL drops below `-MAX_SESSION_LOSS`. Set this value appropriately for your risk tolerance.
-- **Reset session state before starting a new session.** The engine loads `sessionPnL` and `sessionLoss` from the previous state snapshot on startup. If the prior session ended with losses, the engine may immediately trigger the `MAX_SESSION_LOSS` shutdown before placing a single order. Open `state/early-bird.json` (simulation) or `state/early-bird-prod.json` (production) and set both fields to `0` before each new session.
-
+- **Design for restarts.** Callbacks are not persisted across crashes. Orders will be tracked but callback chains will not resume. Avoid designs where the only exit path is a callback chain started before a potential crash.
+- **Reset session state before starting a new session** if the prior session ended with losses that already meet the `MAX_SESSION_LOSS` threshold.
 
 ---
 
 ## Production Setup
 
-Production mode places real orders on Polymarket using real funds. Before enabling it, ensure you have completed the following steps.
+Production mode places real orders with real funds. Complete all steps before enabling.
 
 ### 1. Create a Polymarket Wallet
 
-You need a Polygon-compatible wallet with a private key. This wallet will be used to sign and submit orders to the Polymarket CLOB. If you do not already have one, you can generate a wallet using any standard Ethereum wallet tool (e.g. MetaMask, `ethers.js`, `cast wallet new`).
+You need a Polygon-compatible wallet with a private key. Fund the wallet with USDC on the Polygon network.
 
-Fund the wallet with USDC on the Polygon network. This is the settlement currency on Polymarket.
+### 2. Wrap USDC to pUSD
 
-### 2. Obtain Builder API Credentials
+Polymarket v2 uses pUSD (wrapped USDC.e). Run the wrap script before your first production run:
 
-The engine uses Polymarket's gasless relayer to redeem resolved positions on-chain without paying gas fees. This requires a **Builder API key**, which is separate from your wallet private key.
+```bash
+bun scripts/pusd.ts wrap
+```
 
-To obtain one:
+See [MIGRATE_V2.md](MIGRATE_V2.md) for details.
+
+### 3. Obtain Builder API Credentials
+
+The engine uses Polymarket's gasless relayer to redeem resolved positions on-chain without paying gas.
 
 1. Log in to [polymarket.com](https://polymarket.com) and complete profile creation.
 2. Go to **Settings → Builder Codes**.
 3. Click **Create New** to generate a key/secret/passphrase triplet.
 4. Save all three values — the secret and passphrase are only shown once.
 
-### 3. Configure the .env File
-
-Create a `.env` file in the project root with the following variables:
+### 4. Configure the .env File
 
 ```env
-# Wallet private key (with 0x prefix). This signs all orders.
+# Wallet private key (with 0x prefix). Signs all orders.
 PRIVATE_KEY=0x...
 
-# The Polymarket proxy/funder address associated with your account.
-# This is the address Polymarket uses to custody your funds on-chain.
-# You can find it in your Polymarket account settings or by inspecting
-# your deposit transaction on Polygonscan.
+# Polymarket proxy/funder address.
 POLY_FUNDER_ADDRESS=0x...
 
-# Builder API credentials for the gasless relayer (Settings > Builder Codes).
-# Required for on-chain redemption of resolved positions.
+# Builder API credentials for the gasless relayer.
 BUILDER_KEY=...
 BUILDER_SECRET=...
 BUILDER_PASSPHRASE=...
 
-# Asset to trade. Options: btc, eth, xrp, sol, doge
+# Asset to trade.
 MARKET_ASSET=btc
 
-# Asset price sources. Comma-separated list of ticker providers.
-# Available: polymarket, binance, coinbase
+# Price sources.
 TICKER=polymarket,coinbase
 
-# Maximum cumulative session loss (in USD) before auto-shutdown.
+# Risk gates.
 MAX_SESSION_LOSS=3
+MAX_DRAWDOWN_PCT=0.20
+DAILY_LOSS_LIMIT=0
 
-# Set to "true" to skip the interactive production confirmation prompt.
-# Useful for unattended/automated runs. Leave as "false" for safety.
+# Skip the interactive confirmation prompt (for automated runs).
 FORCE_PROD=false
 ```
 
-### 4. Run in Production
+### 5. Run in Production
 
 ```bash
 bun run index.ts --strategy <your-strategy> --prod
 ```
 
-The engine will prompt for confirmation:
+Type `Y` at the confirmation prompt. Set `FORCE_PROD=true` to skip it for automated runs.
 
-```
-Run in PRODUCTION mode with real funds? Enter Y to confirm:
-```
+### 6. Strategy Production Guard
 
-Type `Y` to proceed. To bypass this prompt (e.g. for automated runs), set `FORCE_PROD=true` in your `.env` file.
-
-### 5. Strategy Production Guard
-
-Strategies can check whether they are running in production via `Env.get("PROD")`. The simulation strategies included in this repository block execution in production mode by design:
+Strategies can check whether they are running in production via `Env.get("PROD")`. The three sim-only strategies (`simulation`, `btc-gap-fade`, `multi-level-ofi`) block execution in production by design:
 
 ```ts
 if (Env.get("PROD")) {
@@ -645,28 +753,24 @@ When writing a production strategy, remove this guard and ensure your logic acco
 
 ### Production Checklist
 
-- Verify your wallet has sufficient USDC balance on Polygon.
-- Run your strategy in simulation for at least 10 rounds to validate behavior.
-- Set `MAX_SESSION_LOSS` to an appropriate value for your risk tolerance.
-- Confirm that `PRIVATE_KEY` and `POLY_FUNDER_ADDRESS` are correct and correspond to the same Polymarket account.
-- Confirm that `BUILDER_KEY`, `BUILDER_SECRET`, and `BUILDER_PASSPHRASE` are set (required for on-chain redemption).
-- Do not commit your `.env` file to version control. The `.gitignore` already excludes it.
+- Wallet has sufficient pUSD balance on Polygon (run `bun scripts/pusd.ts wrap` if needed).
+- Strategy validated in simulation for at least 10 rounds.
+- `MAX_SESSION_LOSS`, `MAX_DRAWDOWN_PCT`, and `DAILY_LOSS_LIMIT` set appropriately.
+- `PRIVATE_KEY` and `POLY_FUNDER_ADDRESS` are correct and correspond to the same Polymarket account.
+- `BUILDER_KEY`, `BUILDER_SECRET`, and `BUILDER_PASSPHRASE` are set.
+- `.env` is not committed to version control (already excluded by `.gitignore`).
 
 ---
 
 ## Redemption
 
-When a market resolves, winning token holders must redeem their positions on-chain to convert them back to USDC. The engine handles this automatically for strategies that hold positions to resolution, and a standalone batch script is provided for manual or retroactive redemptions.
+When a market resolves, winning token holders must redeem positions on-chain to convert them back to USDC. The engine handles this automatically in production mode.
 
 ### Auto-Redeem (Engine)
 
-When a lifecycle completes and transitions to DONE, the engine automatically calls `redeemPositions` on-chain for the resolved market — but only in production mode (`PROD=true`) and only when the lifecycle went through `_waitForResolution` (i.e. the strategy held a position to market close rather than selling it).
+When a lifecycle completes in production and the strategy held a position to market close, the engine automatically calls `redeemPositions` on-chain via Polymarket's gasless relayer. No MATIC is required. Redemption failures are logged but do not block shutdown.
 
-Redemption uses Polymarket's gasless relayer (`relayer-v2.polymarket.com`), so no MATIC is required. If redemption fails (e.g. already redeemed, network error), the error is logged and the lifecycle still transitions to DONE — it does not block shutdown.
-
-### Batch Redeem Script (scripts/redeem.ts)
-
-The redeem script fetches all currently redeemable positions for your proxy wallet from the Polymarket Data API and submits on-chain redemptions for each one via the gasless relayer.
+### Batch Redeem Script
 
 ```bash
 # Check what positions are redeemable (no transactions sent)
@@ -676,13 +780,7 @@ bun scripts/redeem.ts --dry-run
 bun scripts/redeem.ts
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--dry-run` | Prints redeemable positions without sending any transactions. |
-
-The script uses `POLY_FUNDER_ADDRESS` to look up positions and `BUILDER_KEY/SECRET/PASSPHRASE` to authenticate with the relayer. Both must be set in `.env`.
-
-Run this script periodically (e.g. after each session) to ensure resolved positions are converted back to USDC.
+Run this script periodically after each session to ensure resolved positions are converted back to USDC.
 
 ---
 
@@ -690,117 +788,63 @@ Run this script periodically (e.g. after each session) to ensure resolved positi
 
 ### Log Files
 
-The engine produces two types of log output:
-
 **Console log** (`logs/early-bird-YYYY-MM-DD-HH-mm-ss.log`)
 
-A timestamped, human-readable log of engine events: startup, lifecycle transitions, order placements, fills, cancellations, PnL summaries, and shutdown messages. Written by the global `log` singleton. Useful for understanding the high-level flow of a session.
+Timestamped, human-readable log of engine events: startup, lifecycle transitions, order placements, fills, cancellations, PnL summaries, and shutdown messages.
 
 **Market log** (`logs/early-bird-{slug}.log`)
 
-A structured NDJSON (newline-delimited JSON) log generated per market round. By default, the `Logger` class writes one of these only when orders were placed (PnL is non-zero). Pass `--always-log` to write a log for every round regardless, which is useful for debugging rounds where the strategy chose not to enter. It contains:
+Structured NDJSON log generated per market round. Written only when orders were placed by default; pass `--always-log` to write for every round. Contains:
 
 | Entry type | Description |
 |------------|-------------|
-| `slot` | Start and end markers with slug, start time, and end time. |
-| `orderbook_snapshot` | Full order book state (top-of-book asks and bids for UP and DOWN). Written every 1 second. |
-| `remaining` | Seconds remaining in the market window. Paired with each snapshot. |
-| `ticker` | Asset price from all configured sources and cross-source divergence. |
-| `market_price` | The open price (price to beat) and current gap once the market window opens. |
-| `order` | Order events: `placed`, `filled`, `expired`, `failed`, `canceled`. Includes side, action, price, shares. |
-| `resolution` | Final market outcome: direction (UP/DOWN), open/close prices, unfilled shares, payout, and PnL. |
-
-These structured logs are the input for the chart visualization tool.
+| `slot` | Start and end markers |
+| `orderbook_snapshot` | Full top-of-book state, written every second |
+| `remaining` | Seconds remaining in the market window |
+| `ticker` | Asset price from all sources, divergence |
+| `market_price` | Open price and current gap |
+| `order` | Order events: placed, filled, expired, failed, canceled |
+| `resolution` | Final outcome: direction, open/close prices, payout, PnL |
 
 ### Chart Visualization
-
-The `scripts/chart.ts` script parses a market log file and generates an interactive HTML chart that visualizes the entire market lifecycle. It is the primary debugging tool for understanding what happened during a market round.
 
 ```bash
 bun run scripts/chart.ts logs/early-bird-btc-updown-5m-1775241600.log [--open]
 ```
 
-This produces an HTML file in the same directory as the log. Pass `--open` to automatically open it in the default browser after writing. Without the flag, open it manually to inspect the chart.
+Generates an interactive HTML chart from a market log file. Renders the full order book timeline (UP/DOWN ask and bid lines), order event markers, and the BTC price curve. The `--open` flag opens the chart in your default browser automatically.
 
-The chart renders the following data on a shared time axis (x-axis = seconds remaining until market close):
+**Debugging workflow:**
 
-**Summary bar**
+1. Run a simulation session: `bun run index.ts --rounds 5`
+2. Identify the market round from the console log.
+3. Find the market log in `logs/` (named by slug).
+4. Generate the chart: `bun run scripts/chart.ts logs/early-bird-{slug}.log`
+5. Open the HTML file and inspect the timeline.
 
-A header bar above the charts shows at-a-glance stats for the round:
-
-| Field | Description |
-|-------|-------------|
-| BUY filled | Count of filled buy orders, split by UP and DOWN side. |
-| SELL filled | Count of filled sell orders, split by UP and DOWN side. |
-| Pending (unfilled) | Count of buys that filled but whose corresponding sell never filled, per side. Only shown when non-zero. |
-| Resolved | The market outcome direction (UP or DOWN). Only shown after resolution. |
-| PnL | Final PnL for the round in USD, color-coded green (profit) or red (loss). Only shown after resolution. |
-
-**Main chart (Order Book)**
-- UP Ask / DOWN Ask (red lines; DOWN is dashed to distinguish)
-- UP Bid / DOWN Bid (green lines; DOWN is dashed to distinguish)
-- Order event markers: triangles for buys, diamonds for sells, color-coded by status:
-  - Green: filled
-  - Cyan: placed
-  - Gray: canceled
-  - Slate: expired
-  - Red: failed
-- Hovering over any point shows a tooltip with the full order book state and order details at that moment. Nearby orders within the same time window are grouped into a single tooltip.
-
-**Asset Price chart**
-- Asset price over time (blue line).
-- Price to beat / open price (orange dashed line). This is the reference price the market resolves against.
-- Tooltip shows the current asset price, price to beat, and gap at any point in time.
-
-The following screenshots are from the **simulation strategy** (`--strategy simulation`), showing what a winning and losing round look like in the chart. The order markers, price curves, and sub-charts are identical in structure for any strategy -- only the timing and placement logic differ.
-
-| Winning Round | Losing Round |
-|:---:|:---:|
-| ![Winning round](assets/simulation-strategy-win.png) | ![Losing round](assets/simulation-strategy-loss.png) |
-
-The chart is useful for answering questions such as:
-
-- At what point did the strategy place its buy order? What was the order book state at that moment?
-- Did the ask/bid spread widen or narrow before the fill?
-- Was the stop-loss triggered by a genuine price reversal or a momentary spike?
-- How volatile was the asset price in the seconds leading up to entry?
-- Did the market resolution match the gap direction at entry time?
+For rapid iteration: `bun run index.ts --rounds 1`, then immediately chart it.
 
 ### Live Order Book Monitor
 
-The `scripts/orderbook.ts` script connects to the Polymarket WebSocket and displays a real-time terminal view of the order book for the current or a specific market slot. It shows the UP and DOWN sides with ask/bid levels, the asset price from all configured sources, the price to beat, gap, and time remaining.
-
 ```bash
-# Monitor the current BTC market slot (locks to the slot at startup)
+# Monitor the current BTC market slot
 bun run scripts/orderbook.ts
 
-# Monitor a different asset (e.g. ETH)
+# Monitor ETH
 bun run scripts/orderbook.ts --asset eth
 
-# Monitor a specific market offset (e.g. next slot)
+# Monitor next slot
 bun run scripts/orderbook.ts --market 1
 
-# Continuously follow new slots as they open
+# Follow new slots continuously
 bun run scripts/orderbook.ts --continuous
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--asset <a>` | Asset to monitor. Valid values: `btc`, `eth`, `xrp`, `sol`, `doge`. Sets the `MARKET_ASSET` environment variable. Defaults to `btc`. |
-| `--market <n>` | Market slot offset or timestamp. `0` = current, `1` = next, `-1` = previous. You can also pass a Unix timestamp from a slug (e.g. `--market 1775301600`). Defaults to current. |
-| `--window <w>` | Market window duration. `5m` (default) or `15m`. Sets the `MARKET_WINDOW` environment variable for the script. |
-| `--continuous` | Follow new slots automatically as they open. Without this flag, the monitor locks to the slot resolved at startup and stays there. |
+| `--asset <a>` | Asset to monitor: `btc`, `eth`, `xrp`, `sol`, `doge`. Defaults to `btc`. |
+| `--market <n>` | Slot offset or timestamp. `0` = current, `1` = next, `-1` = previous. |
+| `--window <w>` | Window duration: `5m` (default) or `15m`. |
+| `--continuous` | Follow new slots as they open. |
 
-This is significantly faster than viewing the order book on the Polymarket website. The website introduces rendering lag, CDN caching, and client-side polling delays that can add 1-3 seconds of latency on top of the underlying data feed. The terminal monitor connects directly to the same WebSocket the engine uses, giving you the exact same view of the book that your strategy sees in real time. This is especially useful for verifying that your strategy's entry and exit prices align with what the book actually looks like at the moment of execution.
-
-<p><img src="assets/orderbook.png" alt="Terminal order book monitor" width="550"></p>
-
-### Debugging Workflow
-
-1. Run a simulation session: `bun run index.ts --rounds 5`
-2. Identify the market round you want to inspect from the console log.
-3. Find the corresponding market log file in `logs/` (named by slug).
-4. Generate the chart: `bun run scripts/chart.ts logs/early-bird-{slug}.log`
-5. Open the HTML file in a browser and inspect the timeline.
-
-For rapid iteration, run the engine with `--rounds 1` to isolate a single market round, then immediately chart it.
+The monitor connects directly to the same WebSocket the engine uses, giving you the exact same view of the book that your strategy sees in real time.

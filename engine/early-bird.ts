@@ -62,9 +62,10 @@ export class EarlyBird {
     alwaysLog = false,
   ) {
     this._prod = prod;
-    this._statePath = prod
-      ? "state/early-bird-prod.json"
-      : "state/early-bird.json";
+    // STATE_FILE env lets the dashboard spawn multiple per-strategy instances
+    // with isolated state, without conflicts.
+    this._statePath = process.env.STATE_FILE
+      ?? (prod ? "state/early-bird-prod.json" : "state/early-bird.json");
     this._rounds = rounds;
     this._strategyName = strategyName ?? DEFAULT_STRATEGY;
     this._strategy = strategies[this._strategyName]!;
@@ -112,7 +113,7 @@ export class EarlyBird {
       }
     } else {
       initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
-      log.write(`[startup] 📋 PAPER TRADING — simulated balance: $${initialBalance.toFixed(2)} (not real money)`, "yellow");
+      log.write(`[startup] PAPER TRADING — simulated balance: $${initialBalance.toFixed(2)} (not real money)`, "yellow");
     }
     this._initialBalance = initialBalance;
     this._tracker = new WalletTracker(initialBalance, (msg) =>
@@ -244,9 +245,8 @@ export class EarlyBird {
           alwaysLog: this._alwaysLog,
         });
         this._lifecycles.set(slug, newLifecycle);
-        // Notify DB of the new round (slot timestamps come from the slug).
         const slotEndMs = newLifecycle.slotEndMs;
-        const slotStartMs = slotEndMs - 300_000;
+        const slotStartMs = newLifecycle.slotStartMs;
         this._dbHooks?.onRoundStart(slug, slotStartMs, slotEndMs);
         this._roundsCreated++;
       }
@@ -299,11 +299,9 @@ export class EarlyBird {
         orderHistory: lifecycle.orderHistory,
       });
 
-      // Record round outcome to the performance DB.
       if (this._dbHooks) {
         const slotEnd = lifecycle.slotEndMs;
-        const slotStart = slotEnd - 300_000;
-        // marketResult is keyed by slot.startTime (Unix ms)
+        const slotStart = lifecycle.slotStartMs;
         const marketResult = this._apiQueue.marketResult.get(slotStart);
         this._dbHooks.onRoundEnd({
           slug,
@@ -377,7 +375,6 @@ export class EarlyBird {
       this._saveState();
     }
 
-    // Auto-shutdown when all rounds complete and no lifecycles remain
     if (!this._shuttingDown && roundsExhausted && this._lifecycles.size === 0) {
       this._startShutdown(`All ${this._rounds} round(s) complete.`);
     }
@@ -436,6 +433,7 @@ export class EarlyBird {
     saveState(this._statePath, {
       sessionPnl: this._sessionPnl,
       sessionLoss: this._sessionLoss,
+      balance: this._tracker.balance,
       daily: this._daily,
       activeMarkets,
       completedMarkets: this._completedMarkets,

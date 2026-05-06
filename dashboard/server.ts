@@ -19,15 +19,136 @@
 // =============================================================================
 
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { DbReader } from "../db/reader.ts";
-import { runMigrations } from "../db/schema.ts";
 import type { ProjectionInput } from "../db/reader.ts";
 
 const PORT = parseInt(process.env.DASHBOARD_PORT ?? "3000", 10);
 const DB_PATH = "state/performance.db";
-const STATE_PATH = "state/early-bird.json";
+const ENV_PATH = ".env";
+
+// All available strategy names (mirrors engine/strategy/index.ts registry).
+const ALL_STRATEGIES = [
+  "simulation",
+  "late-entry",
+  "momentum-imbalance",
+  "btc-gap-fade",
+  "passive-maker",
+  "multi-level-ofi",
+] as const;
+
+// -----------------------------------------------------------------------------
+// Engine process manager
+// -----------------------------------------------------------------------------
+
+type EngineStatus = {
+  strategy: string;
+  running: boolean;
+  pid: number | null;
+  startedAt: number | null;
+  exitCode: number | null;
+};
+
+// One child process per strategy. Keyed by strategy name.
+const engineProcs = new Map<string, {
+  proc: ReturnType<typeof Bun.spawn>;
+  startedAt: number;
+}>();
+
+function getEngineStatuses(): EngineStatus[] {
+  return ALL_STRATEGIES.map((strategy) => {
+    const entry = engineProcs.get(strategy);
+    if (!entry) return { strategy, running: false, pid: null, startedAt: null, exitCode: null };
+    // Bun subprocess: exitCode is null while running, a number once exited
+    const exitCode = entry.proc.exitCode;
+    const running = exitCode === null;
+    if (!running) engineProcs.delete(strategy); // reap finished procs
+    return {
+      strategy,
+      running,
+      pid: running ? entry.proc.pid : null,
+      startedAt: running ? entry.startedAt : null,
+      exitCode: running ? null : exitCode,
+    };
+  });
+}
+
+function startEngine(strategy: string): { ok: boolean; error?: string } {
+  if (!(ALL_STRATEGIES as readonly string[]).includes(strategy)) {
+    return { ok: false, error: `Unknown strategy: ${strategy}` };
+  }
+  const existing = engineProcs.get(strategy);
+  if (existing && existing.proc.exitCode === null) {
+    return { ok: false, error: `${strategy} is already running` };
+  }
+
+  // Determine the project root (one level up from dashboard/).
+  const root = join(import.meta.dir, "..");
+  const entrypoint = join(root, "index.ts");
+
+  // Per-strategy state file keeps sessions isolated.
+  // PERF_DB=true so rounds are recorded; FORCE_PROD skips the readline prompt.
+  const proc = Bun.spawn(
+    ["bun", "run", entrypoint, "--strategy", strategy],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        PERF_DB: "true",
+        SIMULATION_MODE: "true",
+        FORCE_PROD: "false",
+        // Unique lock name so each strategy gets its own PID file.
+        LOCK_NAME: `early-bird-${strategy}`,
+        // Per-strategy state file to avoid clobbering each other.
+        STATE_FILE: `state/early-bird-${strategy}.json`,
+      },
+      stdout: "inherit",
+      stderr: "inherit",
+    },
+  );
+
+  engineProcs.set(strategy, { proc, startedAt: Date.now() });
+  console.log(`[engines] Started ${strategy} (PID ${proc.pid})`);
+  return { ok: true };
+}
+
+function stopEngine(strategy: string): { ok: boolean; error?: string } {
+  const entry = engineProcs.get(strategy);
+  if (!entry || entry.proc.exitCode !== null) {
+    engineProcs.delete(strategy);
+    return { ok: false, error: `${strategy} is not running` };
+  }
+  entry.proc.kill("SIGTERM");
+  console.log(`[engines] Sent SIGTERM to ${strategy} (PID ${entry.proc.pid})`);
+  return { ok: true };
+}
+
+// Clean up all child processes when the dashboard exits.
+process.on("exit", () => {
+  for (const [strategy, entry] of engineProcs) {
+    if (entry.proc.exitCode === null) {
+      entry.proc.kill("SIGTERM");
+      console.log(`[engines] Sent SIGTERM to ${strategy} on dashboard exit`);
+    }
+  }
+});
+
+// Safe-to-expose config keys (no credentials)
+const CONFIG_WHITELIST = new Set([
+  "MARKET_ASSET",
+  "MARKET_WINDOW",
+  "SIMULATION_MODE",
+  "WALLET_BALANCE",
+  "MAX_SESSION_LOSS",
+  "MAX_POSITION_PCT",
+  "MAX_DRAWDOWN_PCT",
+  "DAILY_LOSS_LIMIT",
+  "SIM_PARTIAL_FILL_PROB",
+  "SIM_SLIPPAGE_BPS",
+  "SIM_LATENCY_JITTER_MS",
+  "SIM_NETWORK_FAIL_PROB",
+]);
 
 // -----------------------------------------------------------------------------
 // DB helpers
@@ -36,12 +157,7 @@ const STATE_PATH = "state/early-bird.json";
 function openReadonlyDb(): Database | null {
   if (!existsSync(DB_PATH)) return null;
   try {
-    const db = new Database(DB_PATH, { readonly: true });
-    // Run migrations in readonly mode — this is a no-op if tables exist,
-    // but errors if the file is a fresh DB that hasn't been initialized.
-    // Swallow the error: we'll just return empty data.
-    try { runMigrations(db); } catch {}
-    return db;
+    return new Database(DB_PATH, { readonly: true });
   } catch {
     return null;
   }
@@ -77,6 +193,7 @@ function monteCarlo(
   days: number,
   tradesPerDay = 12,
   paths = 1000,
+  walletStart = 50,
 ): MonteCarloResult {
   const { n, win_rate, avg_win, avg_loss, outcomes } = input;
   const useBootstrap = n >= 30;
@@ -114,12 +231,17 @@ function monteCarlo(
     };
   });
 
-  // Annualized return: median final value / 365 days annualized.
+  // Annualized return: CAGR based on median final PnL relative to starting balance.
+  // Formula: (1 + totalReturn)^(365/days) - 1  where totalReturn = medianFinal / walletStart
   const medianFinal = steps[days]!.p50;
-  // Treat starting balance as the WALLET_START from the latest session.
-  const annualizedReturn = days >= 7 ? (medianFinal / days) * 365 : null;
+  let annualizedReturn: number | null = null;
+  if (days >= 7 && walletStart > 0) {
+    const totalReturn = medianFinal / walletStart;
+    // Compound annual growth rate (handles both positive and negative returns)
+    annualizedReturn = Math.pow(1 + totalReturn, 365 / days) - 1;
+  }
 
-  // Max drawdown on median path.
+  // Max drawdown on median path (as absolute dollar amount from peak).
   const medianPath = pathResults[Math.floor(paths * 0.5)] ?? pathResults[0]!;
   let peak = 0;
   let maxDd = 0;
@@ -174,21 +296,65 @@ function handleEquityCurve(url: URL): Response {
 }
 
 function handleLive(): Response {
-  // DB session + state file JSON for real-time display.
   const session = withReader((r) => r.getLiveSession(), null);
-  let stateJson: unknown = null;
-  if (existsSync(STATE_PATH)) {
-    try { stateJson = JSON.parse(readFileSync(STATE_PATH, "utf-8")); } catch {}
+
+  // Collect the set of distinct state file paths that actually exist.
+  // We track which files we've already read to avoid double-counting when
+  // multiple strategies fall back to the same legacy path.
+  const seenPaths = new Set<string>();
+  type PartialState = { sessionPnl?: number; balance?: number | null; activeMarkets?: unknown[]; completedMarkets?: unknown[] };
+  const stateJson: { sessionPnl: number; balance: number | null; activeMarkets: unknown[]; completedMarkets: unknown[] } =
+    { sessionPnl: 0, balance: null, activeMarkets: [], completedMarkets: [] };
+
+  for (const strategy of ALL_STRATEGIES) {
+    // Per-strategy path first; legacy single-strategy path as fallback.
+    const candidates = [
+      `state/early-bird-${strategy}.json`,
+      "state/early-bird.json",
+    ];
+    for (const p of candidates) {
+      if (seenPaths.has(p) || !existsSync(p)) continue;
+      seenPaths.add(p);
+      try {
+        const s = JSON.parse(readFileSync(p, "utf-8")) as PartialState;
+        stateJson.sessionPnl += s.sessionPnl ?? 0;
+        // Only add balance when it's a real number (older state files omit it).
+        if (typeof s.balance === "number") {
+          stateJson.balance = (stateJson.balance ?? 0) + s.balance;
+        }
+        stateJson.activeMarkets.push(...(s.activeMarkets ?? []));
+        stateJson.completedMarkets.push(...(s.completedMarkets ?? []));
+      } catch {}
+      break; // found a file for this strategy — don't try the legacy path too
+    }
   }
-  return json({ session, state: stateJson });
+
+  return json({ session, state: stateJson, engines: getEngineStatuses() });
+}
+
+function handleEnginesGet(): Response {
+  return json(getEngineStatuses());
+}
+
+async function handleEnginesPost(req: Request): Promise<Response> {
+  let body: { action: "start" | "stop"; strategy: string };
+  try {
+    body = await req.json() as typeof body;
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+  if (!body.action || !body.strategy) {
+    return json({ error: "Required fields: action, strategy" }, 400);
+  }
+  if (body.action === "start") return json(startEngine(body.strategy));
+  if (body.action === "stop")  return json(stopEngine(body.strategy));
+  return json({ error: `Unknown action: ${body.action}` }, 400);
 }
 
 function handleCompare(url: URL): Response {
   const raw = url.searchParams.get("strategies") ?? "";
   const ids = raw ? raw.split(",").map((s) => s.trim()).filter(Boolean) : [];
-  const rows    = withReader((r) => r.compareStrategies(ids), []);
-  const curves  = withReader((r) => r.getEquityCurve({ strategy: ids[0] }), []);
-  // Per-strategy equity curves for the overlay chart.
+  const rows = withReader((r) => r.compareStrategies(ids), []);
   const allCurves = ids.length > 0
     ? Object.fromEntries(ids.map((id) => [
         id,
@@ -198,7 +364,6 @@ function handleCompare(url: URL): Response {
         const all = r.listStrategies().map((s) => s.id);
         return Object.fromEntries(all.map((id) => [id, r.getEquityCurve({ strategy: id })]));
       }, {});
-  void curves;
   return json({ rows, curves: allCurves });
 }
 
@@ -210,13 +375,17 @@ function handleProjections(url: URL): Response {
     strategy_id: strategyId, n: 0, win_rate: 0, avg_win: 0, avg_loss: 0, outcomes: [],
   });
 
+  // Use the wallet_start from the strategy's first session as the baseline.
+  const walletStart = withReader((r) => r.getWalletStartForStrategy(strategyId), null)
+    ?? parseFloat(process.env.WALLET_BALANCE ?? "50");
+
   const periodDays: Record<string, number> = {
     "1d": 1, "1w": 7, "1m": 30, "3m": 90, "6m": 180, "1y": 365, "3y": 1095,
   };
 
   const results: Record<string, MonteCarloResult> = {};
   for (const [key, days] of Object.entries(periodDays)) {
-    results[key] = monteCarlo(input, days);
+    results[key] = monteCarlo(input, days, 12, 1000, walletStart);
   }
 
   // Kelly fraction for UI display.
@@ -232,7 +401,109 @@ function handleProjections(url: URL): Response {
     ? Math.abs(input.avg_loss) / (input.avg_win + Math.abs(input.avg_loss))
     : null;
 
-  return json({ input, projections: results, kelly, quarterKelly: kelly != null ? kelly / 4 : null, breakEven });
+  return json({ input, projections: results, kelly, quarterKelly: kelly != null ? kelly / 4 : null, breakEven, walletStart });
+}
+
+// -----------------------------------------------------------------------------
+// Config handlers
+// -----------------------------------------------------------------------------
+
+function parseEnvFile(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of content.replace(/\r\n/g, "\n").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    // Strip inline comment from value
+    let val = trimmed.slice(eq + 1).trim();
+    const commentIdx = val.indexOf(" #");
+    if (commentIdx !== -1) val = val.slice(0, commentIdx).trim();
+    result[key] = val;
+  }
+  return result;
+}
+
+function handleGetConfig(): Response {
+  const defaults: Record<string, string> = {
+    MARKET_ASSET: "btc",
+    MARKET_WINDOW: "5m",
+    SIMULATION_MODE: "true",
+    WALLET_BALANCE: "50",
+    MAX_SESSION_LOSS: "3",
+    MAX_POSITION_PCT: "0.05",
+    MAX_DRAWDOWN_PCT: "0.20",
+    DAILY_LOSS_LIMIT: "0",
+    SIM_PARTIAL_FILL_PROB: "0",
+    SIM_SLIPPAGE_BPS: "0",
+    SIM_LATENCY_JITTER_MS: "0",
+    SIM_NETWORK_FAIL_PROB: "0",
+  };
+
+  let fileValues: Record<string, string> = {};
+  if (existsSync(ENV_PATH)) {
+    try {
+      fileValues = parseEnvFile(readFileSync(ENV_PATH, "utf-8"));
+    } catch {}
+  }
+
+  const config: Record<string, string> = {};
+  for (const key of CONFIG_WHITELIST) {
+    config[key] = fileValues[key] ?? process.env[key] ?? defaults[key] ?? "";
+  }
+  return json(config);
+}
+
+async function handlePostConfig(req: Request): Promise<Response> {
+  let body: Record<string, string>;
+  try {
+    body = await req.json() as Record<string, string>;
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  // Reject any keys not in the whitelist
+  for (const key of Object.keys(body)) {
+    if (!CONFIG_WHITELIST.has(key)) {
+      return json({ error: `Forbidden key: ${key}` }, 403);
+    }
+  }
+
+  // Read current .env (or start with empty string)
+  let content = "";
+  if (existsSync(ENV_PATH)) {
+    try { content = readFileSync(ENV_PATH, "utf-8"); } catch {}
+  }
+
+  const updated = new Set<string>();
+  const lines = content.replace(/\r\n/g, "\n").split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) return line;
+    const key = trimmed.slice(0, eq).trim();
+    if (key in body && CONFIG_WHITELIST.has(key)) {
+      updated.add(key);
+      return `${key}=${body[key]}`;
+    }
+    return line;
+  });
+
+  // Append any keys that weren't already in the file
+  for (const [key, val] of Object.entries(body)) {
+    if (!updated.has(key)) {
+      lines.push(`${key}=${val}`);
+    }
+  }
+
+  try {
+    writeFileSync(ENV_PATH, lines.join("\n"), "utf-8");
+  } catch (e) {
+    return json({ error: `Failed to write .env: ${e}` }, 500);
+  }
+
+  return json({ ok: true });
 }
 
 // Serve the dashboard HTML file.
@@ -250,12 +521,12 @@ function handleRoot(): Response {
 
 const server = Bun.serve({
   port: PORT,
-  fetch(req) {
+  async fetch(req) {
     const url = new URL(req.url);
     const { pathname } = url;
 
     if (req.method === "OPTIONS") {
-      return new Response(null, { headers: { ...CORS, "Access-Control-Allow-Methods": "GET" } });
+      return new Response(null, { headers: { ...CORS, "Access-Control-Allow-Methods": "GET, POST", "Access-Control-Allow-Headers": "Content-Type" } });
     }
 
     try {
@@ -267,7 +538,11 @@ const server = Bun.serve({
       if (pathname === "/api/live")                        return handleLive();
       if (pathname === "/api/compare")                     return handleCompare(url);
       if (pathname === "/api/projections")                 return handleProjections(url);
-      return new Response("Not found", { status: 404 });
+      if (pathname === "/api/engines" && req.method === "GET")  return handleEnginesGet();
+      if (pathname === "/api/engines" && req.method === "POST") return await handleEnginesPost(req);
+      if (pathname === "/api/config" && req.method === "GET")  return handleGetConfig();
+      if (pathname === "/api/config" && req.method === "POST") return await handlePostConfig(req);
+      return json({ error: "Not found" }, 404);
     } catch (e) {
       console.error("[dashboard] Route error:", e);
       return json({ error: String(e) }, 500);
@@ -277,4 +552,4 @@ const server = Bun.serve({
 
 console.log(`[dashboard] Server running at http://localhost:${server.port}`);
 console.log(`[dashboard] DB path: ${DB_PATH}`);
-console.log(`[dashboard] Watching state: ${STATE_PATH}`);
+console.log(`[dashboard] Watching state: state/early-bird-<strategy>.json`);

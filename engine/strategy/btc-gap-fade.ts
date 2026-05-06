@@ -27,18 +27,18 @@ import type { Strategy } from "./types.ts";
 import { Env } from "../../utils/config.ts";
 import type { ParamsSchema } from "./strategy-meta.ts";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 
 export const PARAMS_SCHEMA: ParamsSchema = {
-  BGF_GAP_THRESHOLD:    { default: 30,   description: "Min absolute BTC gap ($) to trigger entry" },
-  BGF_FADE_RATIO:       { default: 0.85, description: "PGR ceiling — enter when gap faded to < this fraction of peak" },
-  BGF_MIN_ATR:          { default: 5,    description: "Min ATR value required for entry" },
-  BGF_TAKE_PROFIT_PRICE:{ default: 0.65, description: "GTC take-profit sell price" },
+  BGF_GAP_THRESHOLD:    { default: 20,   description: "Min absolute BTC gap ($) to trigger entry" },
+  BGF_FADE_RATIO:       { default: 0.70, description: "PGR ceiling — enter when gap faded to < this fraction of peak" },
+  BGF_MIN_ATR:          { default: 3,    description: "Min ATR value required for entry" },
+  BGF_TAKE_PROFIT_PRICE:{ default: 0.55, description: "GTC take-profit sell price (more achievable in 5m window)" },
   BGF_STOP_AT_SECS:     { default: 30,   description: "Hard-stop: emergency exit this many seconds before close" },
-  BGF_REVIEW_AT_SECS:   { default: 60,   description: "Review: check for gap re-expansion this many seconds before close" },
-  BGF_ENTRY_MIN_SECS:   { default: 200,  description: "Entry window open (seconds before close)" },
-  BGF_ENTRY_MAX_SECS:   { default: 240,  description: "Entry window close (seconds before close)" },
-  BGF_POSITION_SHARES:  { default: 5,    description: "Max USDC budget for the position" },
+  BGF_REVIEW_AT_SECS:   { default: 45,   description: "Review: check for gap re-expansion this many seconds before close" },
+  BGF_ENTRY_MIN_SECS:   { default: 100,  description: "Entry window open (seconds before close)" },
+  BGF_ENTRY_MAX_SECS:   { default: 160,  description: "Entry window close (seconds before close)" },
+  BGF_POSITION_SHARES:  { default: 5,    description: "USDC budget for the position (shares = floor(budget / askPrice))" },
 };
 
 // -----------------------------------------------------------------------------
@@ -65,20 +65,21 @@ function readConfig(): Config {
     return isNaN(n) ? def : n;
   };
   return {
-    gapThreshold:     f("BGF_GAP_THRESHOLD",     30),
-    fadeRatio:        f("BGF_FADE_RATIO",         0.85),
-    minAtr:           f("BGF_MIN_ATR",            5),
-    takeProfitPrice:  f("BGF_TAKE_PROFIT_PRICE",  0.65),
+    gapThreshold:     f("BGF_GAP_THRESHOLD",     20),
+    fadeRatio:        f("BGF_FADE_RATIO",         0.70),
+    minAtr:           f("BGF_MIN_ATR",            3),
+    takeProfitPrice:  f("BGF_TAKE_PROFIT_PRICE",  0.55),
     stopAtSecs:       f("BGF_STOP_AT_SECS",       30),
-    reviewAtSecs:     f("BGF_REVIEW_AT_SECS",     60),
-    entryMinSecs:     f("BGF_ENTRY_MIN_SECS",     200),
-    entryMaxSecs:     f("BGF_ENTRY_MAX_SECS",     240),
+    reviewAtSecs:     f("BGF_REVIEW_AT_SECS",     45),
+    entryMinSecs:     f("BGF_ENTRY_MIN_SECS",     100),
+    entryMaxSecs:     f("BGF_ENTRY_MAX_SECS",     160),
     positionShares:   f("BGF_POSITION_SHARES",    5),
   };
 }
 
 // -----------------------------------------------------------------------------
 // Indicators
+// TODO: RSI and ATR are also inlined in late-entry.ts — consolidate into utils.ts
 // -----------------------------------------------------------------------------
 
 class RSI {
@@ -289,17 +290,11 @@ export const btcGapFade: Strategy = async (ctx) => {
     const atr = indicators.atr;
     if (atr === null || atr < cfg.minAtr) return;
 
-    // RSI confirms fade: if gap is positive (BTC above open, UP winning),
-    // RSI < 50 means momentum is slowing → DOWN is recovering.
-    const rsi = indicators.rsi;
-    if (rsi === null) return;
-    if (gap > 0 && rsi >= 50) return;
-    if (gap < 0 && rsi <= 50) return;
-
     // Fade side: buy the token that is currently losing.
+    // Only enter if fade token is cheap enough to give upside to TP.
     const fadeSide: "UP" | "DOWN" = gap > 0 ? "DOWN" : "UP";
     const askInfo = ctx.orderBook.bestAskInfo(fadeSide);
-    if (!askInfo || askInfo.price > 0.45) return;
+    if (!askInfo || askInfo.price > 0.40) return;
 
     const shares = Math.floor(cfg.positionShares / askInfo.price);
     if (shares < 1) return;
@@ -310,7 +305,7 @@ export const btcGapFade: Strategy = async (ctx) => {
 
     ctx.log(
       `[${ctx.slug}] btc-gap-fade: ENTRY ${fadeSide} @ ${askInfo.price} ` +
-      `(gap ${gap.toFixed(0)}, pgr ${pgr.toFixed(2)}, atr ${atr.toFixed(1)}, rsi ${rsi.toFixed(0)})`,
+      `(gap ${gap.toFixed(0)}, pgr ${pgr.toFixed(2)}, atr ${atr.toFixed(1)})`,
       "cyan",
     );
 

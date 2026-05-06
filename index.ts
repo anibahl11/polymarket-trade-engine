@@ -11,7 +11,7 @@ import {
 
 const program = new Command()
   .description(
-    "Automated trading engine for Polymarket binary prediction markets (e.g. BTC Up/Down 5-minute) ",
+    "Automated trading engine for Polymarket binary prediction markets (e.g. BTC Up/Down 5-minute)",
   )
   .option(
     "-s, --strategy <name>",
@@ -62,7 +62,9 @@ const opts = program.opts<{
   alwaysLog?: boolean;
 }>();
 
-acquireProcessLock("early-bird");
+// LOCK_NAME can be overridden via env so the dashboard can run multiple
+// per-strategy instances without lock conflicts.
+acquireProcessLock(process.env.LOCK_NAME ?? "early-bird");
 
 if (!strategies[opts.strategy]) {
   console.error(`Unknown strategy: "${opts.strategy}"`);

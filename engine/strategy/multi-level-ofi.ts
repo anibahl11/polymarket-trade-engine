@@ -25,14 +25,14 @@ import type { Strategy } from "./types.ts";
 import { Env } from "../../utils/config.ts";
 import type { ParamsSchema } from "./strategy-meta.ts";
 
-export const VERSION = "1.0.0";
+export const VERSION = "1.1.0";
 
 export const PARAMS_SCHEMA: ParamsSchema = {
-  MLOFI_OFI_THRESHOLD:    { default: 50,     description: "Min weighted OFI magnitude to consider signal" },
-  MLOFI_DISLOC_BTC_PCT:   { default: 0.0005, description: "Min BTC % move in 30s to count as dislocation" },
-  MLOFI_DISLOC_TOKEN_GAP: { default: 0.04,   description: "Min token mispricing vs fair value for dislocation" },
-  MLOFI_FEE_SAFE_MAX:     { default: 0.38,   description: "Max entry price in fee-safe zone (lower band)" },
-  MLOFI_FEE_SAFE_MIN:     { default: 0.62,   description: "Min entry price in fee-safe zone (upper band)" },
+  MLOFI_OFI_THRESHOLD:    { default: 20,     description: "Min weighted OFI magnitude to consider signal" },
+  MLOFI_DISLOC_BTC_PCT:   { default: 0.0002, description: "Min BTC % move in 30s to count as dislocation" },
+  MLOFI_DISLOC_TOKEN_GAP: { default: 0.02,   description: "Min token mispricing vs fair value for dislocation" },
+  MLOFI_FEE_SAFE_MAX:     { default: 0.40,   description: "Upper bound of lower fee-safe zone (enter if price < this)" },
+  MLOFI_FEE_SAFE_MIN:     { default: 0.60,   description: "Lower bound of upper fee-safe zone (enter if price > this)" },
   MLOFI_TAKE_PROFIT_PCT:  { default: 0.20,   description: "Take-profit % above entry price" },
   MLOFI_STOP_LOSS_PCT:    { default: 0.30,   description: "Stop-loss % below entry price" },
   MLOFI_MIN_REMAINING_S:  { default: 30,     description: "Don't enter with fewer seconds remaining" },
@@ -65,11 +65,11 @@ function readConfig(): Config {
     return isNaN(n) ? def : n;
   };
   return {
-    ofiThreshold:    f("MLOFI_OFI_THRESHOLD",    50),
-    dislocBtcPct:    f("MLOFI_DISLOC_BTC_PCT",   0.0005),
-    dislocTokenGap:  f("MLOFI_DISLOC_TOKEN_GAP", 0.04),
-    feeSafeMax:      f("MLOFI_FEE_SAFE_MAX",     0.38),
-    feeSafeMin:      f("MLOFI_FEE_SAFE_MIN",     0.62),
+    ofiThreshold:    f("MLOFI_OFI_THRESHOLD",    20),
+    dislocBtcPct:    f("MLOFI_DISLOC_BTC_PCT",   0.0002),
+    dislocTokenGap:  f("MLOFI_DISLOC_TOKEN_GAP", 0.02),
+    feeSafeMax:      f("MLOFI_FEE_SAFE_MAX",     0.40),
+    feeSafeMin:      f("MLOFI_FEE_SAFE_MIN",     0.60),
     takeProfitPct:   f("MLOFI_TAKE_PROFIT_PCT",  0.20),
     stopLossPct:     f("MLOFI_STOP_LOSS_PCT",    0.30),
     minRemainingS:   f("MLOFI_MIN_REMAINING_S",  30),
@@ -128,6 +128,8 @@ class PriceWindow {
 // Strategy
 // -----------------------------------------------------------------------------
 
+const TICK_MS = 200;
+
 export const multiLevelOfi: Strategy = async (ctx) => {
   if (Env.get("PROD")) {
     ctx.log("[multi-level-ofi] Simulation only — refusing to run with PROD=true.", "red");
@@ -158,7 +160,6 @@ export const multiLevelOfi: Strategy = async (ctx) => {
       shares: number;
       takeProfitPrice: number;
       stopLossPrice: number;
-      takeProfitOrderId?: string;
     } | null,
     exitFired: false,
   };
@@ -226,7 +227,6 @@ export const multiLevelOfi: Strategy = async (ctx) => {
   // Main tick loop
   // ---------------------------------------------------------------------------
 
-  const TICK_MS = 200;
   const tickInterval = setInterval(() => {
     const remaining = remainingS();
 
@@ -304,7 +304,7 @@ export const multiLevelOfi: Strategy = async (ctx) => {
 
     ctx.log(
       `[${ctx.slug}] multi-level-ofi: FOK ENTRY ${ofiSide} @ ${askInfo.price.toFixed(3)} ` +
-      `(ofi=${ofiSide === "UP" ? ofiUp : -ofiDown > 0 ? -ofiDown : ofiDown} ` +
+      `(ofi=${ofiSide === "UP" ? ofiUp : -ofiDown} ` +
       `btcMove=${(btcPctMove * 100).toFixed(2)}% disloc=${Math.abs(askInfo.price - fairValue).toFixed(3)})`,
       "cyan",
     );

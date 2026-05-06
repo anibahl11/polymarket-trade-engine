@@ -15,30 +15,20 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
-  /* SIM mode: yellow top border; LIVE mode: red top border */
   body.mode-sim  { border-top: 3px solid var(--yellow); }
   body.mode-live { border-top: 3px solid var(--red); }
   header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
   header h1 { font-size: 16px; font-weight: 600; color: var(--blue); }
   header .badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--bg3); border: 1px solid var(--border); }
   header .badge.live-session { border-color: var(--green); color: var(--green); }
-  /* Mode pill — always visible, prominent */
-  .mode-pill {
-    font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 4px;
-    letter-spacing: 0.5px; text-transform: uppercase;
-  }
+  .mode-pill { font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 4px; letter-spacing: 0.5px; text-transform: uppercase; }
   .mode-pill.sim  { background: rgba(210,153,34,.2); color: var(--yellow); border: 1px solid var(--yellow); }
   .mode-pill.live { background: rgba(248,81,73,.2);  color: var(--red);    border: 1px solid var(--red); }
-  /* Sim disclaimer banner */
-  .sim-banner {
-    background: rgba(210,153,34,.08); border-bottom: 1px solid rgba(210,153,34,.3);
-    padding: 6px 20px; font-size: 12px; color: var(--yellow);
-    display: flex; align-items: center; gap: 8px;
-  }
+  .sim-banner { background: rgba(210,153,34,.08); border-bottom: 1px solid rgba(210,153,34,.3); padding: 6px 20px; font-size: 12px; color: var(--yellow); display: flex; align-items: center; gap: 8px; }
   .sim-banner.hidden { display: none; }
   header .spacer { flex: 1; }
-  nav { display: flex; gap: 2px; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 20px; }
-  nav button { background: none; border: none; color: var(--muted); padding: 10px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  nav { display: flex; gap: 2px; background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 20px; overflow-x: auto; }
+  nav button { background: none; border: none; color: var(--muted); padding: 10px 16px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; }
   nav button:hover { color: var(--text); }
   nav button.active { color: var(--blue); border-bottom-color: var(--blue); }
   main { padding: 20px; max-width: 1400px; margin: 0 auto; }
@@ -65,7 +55,8 @@
   .pill.no-data { background: rgba(210,153,34,.15); color: var(--yellow); }
   .pill.UP { background: rgba(88,166,255,.15); color: var(--blue); }
   .pill.DOWN { background: rgba(188,140,255,.15); color: var(--purple); }
-  select, input { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  select, input[type=number], input[type=text] { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: var(--blue); cursor: pointer; }
   .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
   .label { font-size: 12px; color: var(--muted); }
   .warn { background: rgba(210,153,34,.1); border: 1px solid var(--yellow); border-radius: 6px; padding: 8px 12px; color: var(--yellow); font-size: 12px; margin-bottom: 12px; }
@@ -75,7 +66,36 @@
   .pnl-positive::before { content: "+"; }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--blue); border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .fee-zone { stroke: var(--green); opacity: 0.15; }
+
+  /* Feed */
+  .feed-wrap { max-height: 360px; overflow-y: auto; }
+  .feed-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-ts { color: var(--muted); width: 68px; flex-shrink: 0; }
+  .feed-slug { color: var(--muted); flex: 1; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed-strategy { color: var(--muted); font-size: 11px; width: 120px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed-pnl { font-weight: 600; width: 68px; text-align: right; flex-shrink: 0; }
+
+  /* Config */
+  .config-section { margin-bottom: 24px; }
+  .config-section h3 { font-size: 13px; font-weight: 600; color: var(--blue); margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); text-transform: none; letter-spacing: 0; }
+  .config-row { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .config-row:last-child { border-bottom: none; }
+  .config-label { font-size: 13px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 10px; }
+  .config-key { font-family: monospace; font-size: 11px; color: var(--muted); background: var(--bg3); padding: 1px 6px; border-radius: 3px; }
+  .config-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .config-control { display: flex; align-items: center; gap: 10px; }
+  .config-val-display { font-size: 12px; color: var(--blue); min-width: 48px; }
+  .toggle-btn { padding: 4px 14px; border-radius: 4px; border: 1px solid var(--border); font-size: 12px; font-weight: 600; cursor: pointer; }
+  .toggle-btn.on  { background: rgba(63,185,80,.2);  color: var(--green); border-color: var(--green); }
+  .toggle-btn.off { background: rgba(248,81,73,.15); color: var(--red);   border-color: var(--red); }
+  .save-btn { background: var(--blue); color: #0d1117; border: none; padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .save-btn:hover { opacity: 0.85; }
+  .toast { position: fixed; bottom: 24px; right: 24px; padding: 10px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; z-index: 200; transition: opacity 0.3s; }
+  .toast.success { background: rgba(63,185,80,.9); color: #0d1117; }
+  .toast.error   { background: rgba(248,81,73,.9);  color: #fff; }
+  .toast.hidden  { opacity: 0; pointer-events: none; }
+
   @media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -83,17 +103,15 @@
 
 <header>
   <h1>⚡ Polymarket Engine</h1>
-  <!-- Mode pill — most important signal on the page -->
   <span class="mode-pill" :class="isLiveMode ? 'live' : 'sim'"
         x-text="isLiveMode ? '🔴 LIVE MONEY' : '📋 PAPER TRADING'"></span>
-  <span class="badge" :class="live.session ? 'live-session' : ''"
-        x-text="live.session ? '● ENGINE RUNNING' : '○ ENGINE IDLE'"></span>
-  <span class="badge" x-text="live.session ? live.session.strategy_id : 'No active session'"></span>
+  <span class="badge" :class="engines.some(e=>e.running) ? 'live-session' : ''"
+        x-text="engines.some(e=>e.running) ? '● ENGINE RUNNING' : '○ ENGINE IDLE'"></span>
+  <span class="badge" x-text="engines.filter(e=>e.running).map(e=>e.strategy).join(', ') || 'No active strategies'"></span>
   <div class="spacer"></div>
   <span class="label" x-text="'Updated ' + lastUpdated"></span>
 </header>
 
-<!-- Persistent disclaimer strip — hidden when live -->
 <div class="sim-banner" :class="isLiveMode ? 'hidden' : ''">
   📋 Paper trading active — all balances are simulated, no real money is at risk.
   Connect a real wallet and set <code>SIMULATION_MODE=false --prod</code> to go live.
@@ -101,187 +119,252 @@
 
 <nav>
   <button :class="tab==='live' && 'active'" @click="tab='live'">Live</button>
-  <button :class="tab==='performance' && 'active'" @click="tab='performance'; loadPerf()">Performance</button>
-  <button :class="tab==='compare' && 'active'" @click="tab='compare'; loadCompare()">Compare</button>
   <button :class="tab==='projections' && 'active'" @click="tab='projections'; loadProjections()">Projections</button>
   <button :class="tab==='rounds' && 'active'" @click="tab='rounds'; loadRounds()">Round Browser</button>
+  <button :class="tab==='config' && 'active'" @click="tab='config'; loadConfig()">Config</button>
 </nav>
 
 <main>
 
 <!-- ═══════════════════════════════════════════════════════════ LIVE ══ -->
 <div x-show="tab==='live'">
-  <div class="grid grid-4" style="margin-bottom:16px">
-    <div class="card">
-      <h3>Session PnL</h3>
-      <div class="stat" :class="(live.state?.sessionPnl??0)>=0?'green':'red'"
-           x-text="fmt(live.state?.sessionPnl??0, true)"></div>
-      <div class="sub" x-text="(live.state?.activeMarkets?.length??0)+' active markets'"></div>
+
+  <!-- Strategy Control Panel -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <h3 style="margin-bottom:0">Strategies</h3>
+      <div class="spacer" style="flex:1"></div>
+      <span class="label" x-text="engines.filter(e=>e.running).length + ' running'"></span>
+      <button
+        @click="startAllEngines()"
+        :disabled="engines.every(e=>e.running)"
+        style="background:rgba(63,185,80,.15);border:1px solid var(--green);color:var(--green);padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;opacity:1"
+        :style="engines.every(e=>e.running)?'opacity:.4;cursor:not-allowed':''">
+        Start All
+      </button>
+      <button
+        @click="stopAllEngines()"
+        :disabled="engines.every(e=>!e.running)"
+        style="background:rgba(248,81,73,.1);border:1px solid var(--red);color:var(--red);padding:5px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer"
+        :style="engines.every(e=>!e.running)?'opacity:.4;cursor:not-allowed':''">
+        Stop All
+      </button>
     </div>
-    <div class="card">
-      <h3>BTC Price</h3>
-      <div class="stat blue" x-text="live.session ? '$'+((live.state?.btcPrice??0).toLocaleString()) : '—'"></div>
-      <div class="sub" x-text="live.session ? 'Killswitch: '+(live.state?.killswitch?'ON':'off') : 'Engine idle'"></div>
-    </div>
-    <div class="card" :style="isLiveMode ? 'border-color:var(--red)' : 'border-color:var(--yellow)'">
-      <h3 x-text="isLiveMode ? '💰 On-Chain Balance' : '📋 Simulated Balance'"></h3>
-      <div class="stat" x-text="fmt(live.state?.balance??live.session?.wallet_start??0)"></div>
-      <div class="sub" x-text="isLiveMode ? 'Real pUSD on Polygon' : 'Virtual — not real money'"></div>
-    </div>
-    <div class="card">
-      <h3>Session Rounds</h3>
-      <div class="stat blue" x-text="live.session?.total_rounds??0"></div>
-      <div class="sub" x-text="live.session ? 'Strategy: '+live.session.strategy_id : '—'"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">
+      <template x-for="e in engines" :key="e.strategy">
+        <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 12px"
+             :style="e.running ? 'border-color:var(--green)' : ''">
+          <!-- Status dot -->
+          <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .3s"
+                :style="e.running ? 'background:var(--green);box-shadow:0 0 6px var(--green)' : 'background:var(--muted)'"></span>
+          <!-- Name + pid -->
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" x-text="e.strategy"></div>
+            <div style="font-size:11px;color:var(--muted)" x-text="e.running ? 'PID '+e.pid : 'idle'"></div>
+          </div>
+          <!-- Start / Stop button -->
+          <button
+            x-show="!e.running"
+            @click="engineAction('start', e.strategy)"
+            style="background:rgba(63,185,80,.15);border:1px solid var(--green);color:var(--green);padding:3px 12px;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+            Start
+          </button>
+          <button
+            x-show="e.running"
+            @click="engineAction('stop', e.strategy)"
+            style="background:rgba(248,81,73,.1);border:1px solid var(--red);color:var(--red);padding:3px 12px;border-radius:5px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+            Stop
+          </button>
+        </div>
+      </template>
     </div>
   </div>
 
-  <div class="grid grid-2">
+  <!-- Stat cards -->
+  <div class="grid grid-4" style="margin-bottom:16px">
     <div class="card">
-      <h3>Active Markets</h3>
+      <h3>Combined Session PnL</h3>
+      <div class="stat" :class="(live.state?.sessionPnl??0)>=0?'green':'red'"
+           x-text="fmt(live.state?.sessionPnl??0, true)"></div>
+      <div class="sub" x-text="(live.state?.activeMarkets?.length??0)+' active markets across all strategies'"></div>
+    </div>
+    <div class="card">
+      <h3>Strategies Running</h3>
+      <div class="stat blue" x-text="engines.filter(e=>e.running).length + ' / ' + engines.length"></div>
+      <div class="sub" x-text="(live.state?.activeMarkets?.length??0) + ' active market slots'"></div>
+    </div>
+    <div class="card" style="border-color:var(--yellow)">
+      <h3>Simulated Balance</h3>
+      <div class="stat yellow" x-text="fmt(displayBalance)"></div>
+      <div class="sub" x-text="'Session PnL: ' + fmt(live.state?.sessionPnl ?? 0, true)"></div>
+    </div>
+    <div class="card">
+      <h3>Total Rounds (DB)</h3>
+      <div class="stat blue" x-text="strategies.reduce((s,r)=>s+(r.total_rounds??0),0)"></div>
+      <div class="sub" x-text="strategies.length+' strategies tracked'"></div>
+    </div>
+  </div>
+
+  <!-- Active / Completed markets -->
+  <div class="grid grid-2" style="margin-bottom:16px">
+    <div class="card">
+      <h3>Active Markets <span style="font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0" x-text="'(' + (live.state?.activeMarkets?.length??0) + ' slots)'"></span></h3>
       <template x-if="!(live.state?.activeMarkets?.length)">
         <div class="no-data-msg">No active markets</div>
       </template>
-      <template x-for="m in (live.state?.activeMarkets??[])" :key="m.slug">
-        <div class="order-row">
-          <span class="pill" :class="m.state" x-text="m.state"></span>
-          <span x-text="m.slug" style="font-size:12px;color:var(--muted);flex:1"></span>
-          <span x-text="m.strategyName" style="font-size:11px;color:var(--muted)"></span>
-          <span x-text="m.orderHistory?.length+' fills'" style="font-size:11px"></span>
+      <template x-for="m in (live.state?.activeMarkets??[])" :key="m.slug + '|' + m.strategyName">
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+          <!-- Strategy badge -->
+          <span style="font-size:11px;font-weight:600;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:1px 6px;white-space:nowrap;color:var(--blue);flex-shrink:0" x-text="m.strategyName"></span>
+          <!-- Slot -->
+          <span style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="m.slug"></span>
+          <!-- State pill -->
+          <span class="pill" :class="m.state==='RUNNING'?'win':'no-data'" x-text="m.state" style="flex-shrink:0"></span>
+          <!-- Orders / fills -->
+          <span style="font-size:11px;color:var(--muted);flex-shrink:0" x-text="m.pendingOrders?.length + ' open, ' + m.orderHistory?.length + ' filled'"></span>
         </div>
       </template>
     </div>
     <div class="card">
-      <h3>Recent Completed Markets</h3>
+      <h3>Recent Completed <span style="font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0" x-text="'(' + (live.state?.completedMarkets?.length??0) + ' total)'"></span></h3>
       <template x-if="!(live.state?.completedMarkets?.length)">
         <div class="no-data-msg">No completed markets this session</div>
       </template>
-      <template x-for="m in (live.state?.completedMarkets??[]).slice(-8).reverse()" :key="m.slug">
-        <div class="order-row">
-          <span class="pill" :class="(m.pnl??0)>0?'win':'loss'" x-text="(m.pnl??0)>0?'WIN':'LOSS'"></span>
-          <span x-text="m.slug" style="font-size:12px;color:var(--muted);flex:1"></span>
-          <span :class="(m.pnl??0)>=0?'green':'red'" x-text="fmt(m.pnl??0, true)" style="font-weight:600"></span>
+      <template x-for="m in (live.state?.completedMarkets??[]).slice(-12).reverse()" :key="m.slug + '|' + m.strategyName">
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span class="pill" :class="_outcomeFromPnl(m.pnl)" x-text="_outcomeFromPnl(m.pnl).toUpperCase().replace('-',' ')" style="flex-shrink:0"></span>
+          <span style="font-size:11px;font-weight:600;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:1px 6px;white-space:nowrap;color:var(--blue);flex-shrink:0" x-text="m.strategyName"></span>
+          <span style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="m.slug"></span>
+          <span :class="(m.pnl??0)>0?'green':((m.pnl??0)<0?'red':'muted')" x-text="(m.pnl??0)!==0 ? fmt(m.pnl??0, true) : '—'" style="font-weight:600;flex-shrink:0"></span>
         </div>
       </template>
     </div>
   </div>
 
-  <div class="card" style="margin-top:16px">
-    <h3>Fee Curve — Polymarket Dynamic Taker Fee (0.072 × p × (1−p))</h3>
-    <div class="chart-wrap">
-      <canvas id="feeChart"></canvas>
+  <!-- Live Round Feed -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <h3 style="margin-bottom:0">Round Feed</h3>
+      <div class="spacer" style="flex:1"></div>
+      <span class="label">Show:</span>
+      <select x-model="feedMaxVisible" style="padding:3px 8px;font-size:12px">
+        <option value="10">10</option>
+        <option value="20">20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="0">All</option>
+      </select>
+      <span class="label" x-text="feedLog.length + ' captured'"></span>
     </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════ PERFORMANCE ══ -->
-<div x-show="tab==='performance'" x-cloak>
-  <div class="controls">
-    <span class="label">Period:</span>
-    <select x-model="perfPeriod" @change="loadPerf()">
-      <option value="daily">Daily</option>
-      <option value="weekly">Weekly</option>
-      <option value="monthly">Monthly</option>
-      <option value="3m">3 Month</option>
-      <option value="6m">6 Month</option>
-      <option value="1y">1 Year</option>
-      <option value="3y">3 Year</option>
-    </select>
-    <span class="label">Strategy:</span>
-    <select x-model="perfStrategy" @change="loadPerf()">
-      <option value="">All strategies</option>
-      <template x-for="s in strategies" :key="s.id">
-        <option :value="s.id" x-text="s.id"></option>
-      </template>
-    </select>
-  </div>
-
-  <div class="grid grid-2" style="margin-bottom:16px">
-    <div class="card">
-      <h3>Equity Curve</h3>
-      <div class="chart-wrap tall">
-        <canvas id="equityChart"></canvas>
-      </div>
-    </div>
-    <div class="card">
-      <h3>Net PnL by Period</h3>
-      <div class="chart-wrap tall">
-        <canvas id="pnlBarChart"></canvas>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h3>Period Summary</h3>
-    <template x-if="!perf.length">
-      <div class="no-data-msg">No data — run the engine with PERF_DB=true to populate the database.</div>
+    <template x-if="!feedLog.length">
+      <div class="no-data-msg" style="padding:20px">Waiting for completed rounds…</div>
     </template>
-    <table x-show="perf.length">
-      <thead>
-        <tr>
-          <th>Period</th><th>Rounds</th><th>Trades</th><th>Wins</th><th>Losses</th>
-          <th>Win Rate</th><th>Net PnL</th><th>Avg PnL</th><th>Fees</th>
-        </tr>
-      </thead>
-      <tbody>
-        <template x-for="row in perf" :key="row.period">
-          <tr>
-            <td x-text="row.period"></td>
-            <td x-text="row.total_rounds"></td>
-            <td x-text="row.traded_rounds"></td>
-            <td style="color:var(--green)" x-text="row.win_count"></td>
-            <td style="color:var(--red)" x-text="row.loss_count"></td>
-            <td x-text="row.win_rate!=null ? pct(row.win_rate) : '—'"></td>
-            <td :style="(row.total_net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
-                x-text="fmt(row.total_net_pnl??0, true)"></td>
-            <td x-text="row.avg_net_pnl!=null ? fmt(row.avg_net_pnl,true) : '—'"></td>
-            <td style="color:var(--yellow)" x-text="fmt(row.total_fees??0)"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
+    <div class="feed-wrap" x-show="feedLog.length">
+      <template x-for="(entry, i) in (feedMaxVisible==0 ? feedLog : feedLog.slice(0, +feedMaxVisible))" :key="i">
+        <div class="feed-row">
+          <span class="feed-ts" x-text="entry.time"></span>
+          <span class="pill" :class="entry.outcome" x-text="entry.outcome.toUpperCase()"></span>
+          <span class="feed-slug" x-text="entry.slug"></span>
+          <span class="feed-strategy" x-text="entry.strategyName"></span>
+          <span class="feed-pnl" :class="entry.pnl>=0?'green':'red'" x-text="fmt(entry.pnl, true)"></span>
+        </div>
+      </template>
+    </div>
   </div>
-</div>
 
-<!-- ════════════════════════════════════════════════ COMPARE ══ -->
-<div x-show="tab==='compare'" x-cloak>
+  <!-- Embedded Performance -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <h3 style="margin-bottom:0">Performance</h3>
+      <span class="label">Period:</span>
+      <select x-model="livePerfPeriod" @change="loadLivePerf()" style="padding:3px 8px;font-size:12px">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="3m">3 Month</option>
+        <option value="6m">6 Month</option>
+        <option value="1y">1 Year</option>
+      </select>
+      <span class="label">Strategy:</span>
+      <select x-model="livePerfStrategy" @change="loadLivePerf()" style="padding:3px 8px;font-size:12px">
+        <option value="">All</option>
+        <template x-for="s in strategies" :key="s.id">
+          <option :value="s.id" x-text="s.id"></option>
+        </template>
+      </select>
+    </div>
+    <div class="grid grid-2">
+      <div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Equity Curve</div>
+        <div class="chart-wrap"><canvas id="liveEquityChart"></canvas></div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Net PnL by Period</div>
+        <div class="chart-wrap"><canvas id="livePnlBarChart"></canvas></div>
+      </div>
+    </div>
+    <template x-if="livePerf.length">
+      <div style="margin-top:12px;overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>Period</th><th>Rounds</th><th>Trades</th><th>Win Rate</th><th>Net PnL</th><th>Fees</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="row in livePerf.slice(-5)" :key="row.period">
+              <tr>
+                <td x-text="row.period"></td>
+                <td x-text="row.total_rounds"></td>
+                <td x-text="row.traded_rounds"></td>
+                <td x-text="row.win_rate!=null ? pct(row.win_rate) : '—'"></td>
+                <td :style="(row.total_net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
+                    x-text="fmt(row.total_net_pnl??0, true)"></td>
+                <td style="color:var(--yellow)" x-text="fmt(row.total_fees??0)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </template>
+  </div>
+
+  <!-- Embedded Compare -->
   <div class="card" style="margin-bottom:16px">
     <h3>Strategy Comparison</h3>
-    <template x-if="!compare.rows?.length">
-      <div class="no-data-msg">No strategy data yet.</div>
+    <template x-if="!liveCompare.rows?.length">
+      <div class="no-data-msg" style="padding:20px">No strategy data yet.</div>
     </template>
-    <table x-show="compare.rows?.length">
-      <thead>
-        <tr>
-          <th>Strategy</th><th>Rounds</th><th>Trades</th><th>Win Rate</th>
-          <th>Net PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th>
-          <th>Fees</th><th>Sharpe~</th>
-        </tr>
-      </thead>
-      <tbody>
-        <template x-for="row in (compare.rows??[])" :key="row.strategy_id">
+    <div x-show="liveCompare.rows?.length" style="overflow-x:auto">
+      <table>
+        <thead>
           <tr>
-            <td style="font-weight:600" x-text="row.strategy_id"></td>
-            <td x-text="row.total_rounds"></td>
-            <td x-text="row.traded_rounds"></td>
-            <td x-text="row.win_rate!=null ? pct(row.win_rate) : '—'"></td>
-            <td :style="(row.total_net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
-                x-text="fmt(row.total_net_pnl??0, true)"></td>
-            <td x-text="row.avg_net_pnl!=null ? fmt(row.avg_net_pnl,true) : '—'"></td>
-            <td style="color:var(--green)" x-text="row.best_round!=null ? fmt(row.best_round,true) : '—'"></td>
-            <td style="color:var(--red)"   x-text="row.worst_round!=null ? fmt(row.worst_round,true) : '—'"></td>
-            <td style="color:var(--yellow)" x-text="fmt(row.total_fees??0)"></td>
-            <td x-text="row.sharpe_approx!=null ? row.sharpe_approx.toFixed(2) : '—'"></td>
+            <th>Strategy</th><th>Rounds</th><th>Trades</th><th>Win Rate</th>
+            <th>Net PnL</th><th>Avg PnL</th><th>Best</th><th>Worst</th><th>Sharpe~</th>
           </tr>
-        </template>
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          <template x-for="row in (liveCompare.rows??[])" :key="row.strategy_id">
+            <tr>
+              <td style="font-weight:600" x-text="row.strategy_id"></td>
+              <td x-text="row.total_rounds"></td>
+              <td x-text="row.traded_rounds"></td>
+              <td x-text="row.win_rate!=null ? pct(row.win_rate) : '—'"></td>
+              <td :style="(row.total_net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
+                  x-text="fmt(row.total_net_pnl??0, true)"></td>
+              <td x-text="row.avg_net_pnl!=null ? fmt(row.avg_net_pnl,true) : '—'"></td>
+              <td style="color:var(--green)" x-text="row.best_round!=null ? fmt(row.best_round,true) : '—'"></td>
+              <td style="color:var(--red)"   x-text="row.worst_round!=null ? fmt(row.worst_round,true) : '—'"></td>
+              <td x-text="row.sharpe_approx!=null ? row.sharpe_approx.toFixed(2) : '—'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
   </div>
 
+  <!-- Fee Curve -->
   <div class="card">
-    <h3>Equity Curves (overlay)</h3>
-    <div class="chart-wrap tall">
-      <canvas id="compareChart"></canvas>
-    </div>
+    <h3>Fee Curve — Polymarket Dynamic Taker Fee (0.072 × p × (1−p))</h3>
+    <div class="chart-wrap"><canvas id="feeChart"></canvas></div>
   </div>
 </div>
 
@@ -346,15 +429,11 @@
   <div class="grid grid-2" x-show="proj">
     <div class="card">
       <h3>Monte Carlo Fan Chart (<span x-text="projPeriod"></span> — p10/p50/p90)</h3>
-      <div class="chart-wrap tall">
-        <canvas id="projChart"></canvas>
-      </div>
+      <div class="chart-wrap tall"><canvas id="projChart"></canvas></div>
     </div>
     <div class="card">
       <h3>Fee Cost Curve — Taker Fee % by Token Price</h3>
-      <div class="chart-wrap tall">
-        <canvas id="feeCurveChart"></canvas>
-      </div>
+      <div class="chart-wrap tall"><canvas id="feeCurveChart"></canvas></div>
     </div>
   </div>
 
@@ -372,7 +451,8 @@
                 x-text="fmt(res.steps[res.steps.length-1].p50, true)"></td>
             <td style="color:var(--red)"   x-text="fmt(res.steps[res.steps.length-1].p10, true)"></td>
             <td style="color:var(--green)" x-text="fmt(res.steps[res.steps.length-1].p90, true)"></td>
-            <td x-text="res.annualizedReturn!=null ? fmt(res.annualizedReturn,true)+'/yr' : '—'"></td>
+            <td :style="res.annualizedReturn!=null?(res.annualizedReturn>=0?'color:var(--green)':'color:var(--red)'):''"
+                x-text="res.annualizedReturn!=null ? pct(res.annualizedReturn)+'/yr (CAGR)' : '—'"></td>
             <td style="color:var(--yellow)" x-text="fmt(res.maxDrawdownP50)"></td>
             <td>
               <span class="pill" :class="res.confidence==='high'?'win':'no-data'" x-text="res.confidence"></span>
@@ -383,6 +463,7 @@
     </table>
     <div style="margin-top:12px;font-size:11px;color:var(--muted)">
       Projections use <span x-text="(proj?.input?.n??0)>=30?'bootstrap resampling of actual outcomes':'Bernoulli(winRate) simulation'"></span>.
+      CAGR is relative to starting balance of <span x-text="fmt(proj?.walletStart??50)"></span>.
       Past performance is not indicative of future results. Use at your own risk.
     </div>
   </div>
@@ -404,7 +485,7 @@
       <option value="win">Win</option>
       <option value="loss">Loss</option>
       <option value="no-trade">No Trade</option>
-      <option value="no-data">No Data</option>
+      <option value="no-data">No Data (traded, unresolved)</option>
     </select>
     <button @click="roundOffset=Math.max(0,roundOffset-50);loadRounds()" :disabled="roundOffset===0"
             style="background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer">← Prev</button>
@@ -440,7 +521,11 @@
             <td :style="(r.net_pnl??0)>=0?'color:var(--green)':'color:var(--red)'"
                 x-text="r.net_pnl!=null ? fmt(r.net_pnl,true) : '—'"></td>
             <td style="color:var(--yellow)" x-text="fmt(r.taker_fees??0)"></td>
-            <td><span class="pill" :class="r.outcome??''" x-text="r.outcome??'—'"></span></td>
+            <td>
+              <span class="pill" :class="r.outcome??''"
+                    :title="r.outcome==='no-data' ? 'Trade executed but market resolution data unavailable (engine stopped mid-round)' : ''"
+                    x-text="r.outcome??'—'"></span>
+            </td>
             <td style="font-size:11px;color:var(--muted)" x-text="ts(r.created_at)"></td>
           </tr>
         </template>
@@ -457,7 +542,10 @@
       </div>
       <div class="grid grid-2" style="gap:12px;margin-bottom:16px">
         <div><div class="label">Strategy</div><div x-text="selectedRound?.strategy_id"></div></div>
-        <div><div class="label">Outcome</div><span class="pill" :class="selectedRound?.outcome??''" x-text="selectedRound?.outcome??'—'"></span></div>
+        <div><div class="label">Outcome</div>
+          <span class="pill" :class="selectedRound?.outcome??''" x-text="selectedRound?.outcome??'—'"></span>
+          <span x-show="selectedRound?.outcome==='no-data'" style="font-size:11px;color:var(--yellow);margin-left:6px">Traded, unresolved</span>
+        </div>
         <div><div class="label">Open Price (BTC)</div><div x-text="selectedRound?.open_price??'—'"></div></div>
         <div><div class="label">Close Price (BTC)</div><div x-text="selectedRound?.close_price??'—'"></div></div>
         <div><div class="label">Direction</div><span class="pill" :class="selectedRound?.direction??''" x-text="selectedRound?.direction??'—'"></span></div>
@@ -477,7 +565,162 @@
   </div>
 </div>
 
+<!-- ════════════════════════════════════════════════ CONFIG ══ -->
+<div x-show="tab==='config'" x-cloak>
+  <div class="warn" style="margin-bottom:16px">
+    ⚠ Changes take effect on the <strong>next engine restart</strong> — the engine reads these values at startup only. Saving updates your <code>.env</code> file directly.
+  </div>
+
+  <!-- Market Selection -->
+  <div class="card config-section" style="margin-bottom:16px">
+    <h3>Market Selection</h3>
+
+    <div class="config-row">
+      <div class="config-label">Asset <span class="config-key">MARKET_ASSET</span></div>
+      <div class="config-control">
+        <select x-model="config.MARKET_ASSET">
+          <option value="btc">BTC</option>
+          <option value="eth">ETH</option>
+          <option value="xrp">XRP</option>
+          <option value="sol">SOL</option>
+          <option value="doge">DOGE</option>
+        </select>
+      </div>
+      <div class="config-desc">Which crypto asset's Up/Down markets to trade. Determines the Polymarket slug prefix, price feed source, and order book to watch. Changing this switches the entire universe of markets the engine considers.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">Market Window <span class="config-key">MARKET_WINDOW</span></div>
+      <div class="config-control">
+        <select x-model="config.MARKET_WINDOW">
+          <option value="5m">5 minutes</option>
+          <option value="15m">15 minutes</option>
+        </select>
+      </div>
+      <div class="config-desc">Resolution window for each round. <strong>5m</strong> = 5-minute BTC price prediction markets (faster cycles, more rounds per hour, less time in each position). <strong>15m</strong> = slower, more time for price to move, fewer but longer-lived rounds.</div>
+    </div>
+  </div>
+
+  <!-- Risk Gates -->
+  <div class="card config-section" style="margin-bottom:16px">
+    <h3>Risk Gates <span style="font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0"> — apply in both sim and live mode</span></h3>
+
+    <div class="config-row">
+      <div class="config-label">Simulation Mode <span class="config-key">SIMULATION_MODE</span></div>
+      <div class="config-control">
+        <button class="toggle-btn" :class="config.SIMULATION_MODE==='true'?'on':'off'"
+                @click="config.SIMULATION_MODE = config.SIMULATION_MODE==='true' ? 'false' : 'true'"
+                x-text="config.SIMULATION_MODE==='true' ? '✓ PAPER TRADING ON' : '✗ PAPER TRADING OFF'"></button>
+      </div>
+      <div class="config-desc">Master safety switch. When <strong>ON</strong> (recommended default), all orders are simulated — no real money moves. Turn OFF only when also running with the <code>--prod</code> CLI flag and a funded on-chain wallet. Reflected as the PAPER TRADING / LIVE MONEY banner across the dashboard.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">Starting Wallet Balance <span class="config-key">WALLET_BALANCE</span></div>
+      <div class="config-control">
+        <span style="color:var(--muted);font-size:13px">$</span>
+        <input type="number" x-model="config.WALLET_BALANCE" min="1" step="1" style="width:100px" />
+      </div>
+      <div class="config-desc">Virtual bankroll in USD for paper trading sessions. This is the baseline all Session PnL, return %, and position sizing calculations use. Has no effect in live (<code>--prod</code>) mode — live mode reads your actual on-chain pUSD balance at startup.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">Max Session Loss <span class="config-key">MAX_SESSION_LOSS</span></div>
+      <div class="config-control">
+        <span style="color:var(--muted);font-size:13px">$</span>
+        <input type="number" x-model="config.MAX_SESSION_LOSS" min="0" step="0.5" style="width:100px" />
+      </div>
+      <div class="config-desc">Hard stop: the engine shuts itself down when cumulative session losses reach this dollar amount. E.g. <code>3</code> = stop after losing $3 this session. This counter resets when you restart the engine. Prevents runaway losses in a single run.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">
+        Max Position Size <span class="config-key">MAX_POSITION_PCT</span>
+        <span class="config-val-display" x-text="(parseFloat(config.MAX_POSITION_PCT||0)*100).toFixed(1)+'%'"></span>
+      </div>
+      <div class="config-control">
+        <input type="range" x-model="config.MAX_POSITION_PCT" min="0.01" max="0.25" step="0.01" style="width:200px" />
+      </div>
+      <div class="config-desc">Maximum fraction of your wallet risked on a single buy order. E.g. <code>0.05</code> = 5% means on a $50 wallet you can spend at most $2.50 per entry. Smaller values = more conservative per-trade sizing, more rounds before a total loss is possible. Strategy-level position sizing is also capped by this value.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">
+        Max Drawdown <span class="config-key">MAX_DRAWDOWN_PCT</span>
+        <span class="config-val-display" x-text="(parseFloat(config.MAX_DRAWDOWN_PCT||0)*100).toFixed(1)+'%'"></span>
+      </div>
+      <div class="config-control">
+        <input type="range" x-model="config.MAX_DRAWDOWN_PCT" min="0.05" max="0.50" step="0.01" style="width:200px" />
+      </div>
+      <div class="config-desc">Circuit breaker: shuts the engine down if total session drawdown from your starting balance exceeds this fraction. E.g. <code>0.20</code> = stop if you're down 20% from the starting balance. Acts as a last-resort guard against a strategy going badly wrong.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">Daily Loss Limit <span class="config-key">DAILY_LOSS_LIMIT</span></div>
+      <div class="config-control">
+        <span style="color:var(--muted);font-size:13px">$</span>
+        <input type="number" x-model="config.DAILY_LOSS_LIMIT" min="0" step="0.5" style="width:100px" />
+        <span class="label" style="margin-left:4px">(0 = disabled)</span>
+      </div>
+      <div class="config-desc">Cumulative dollar loss cap for the current UTC day. Persists across engine restarts within the same day — the engine refuses to start if today's losses already exceed this limit. E.g. <code>5</code> = no more trading today once you've lost $5. Set to <code>0</code> to disable entirely.</div>
+    </div>
+  </div>
+
+  <!-- Sim Realism -->
+  <div class="card config-section" style="margin-bottom:16px">
+    <h3>Sim Realism <span style="font-size:11px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0"> — paper trading only, ignored in live mode</span></h3>
+
+    <div class="config-row">
+      <div class="config-label">
+        Partial Fill Probability <span class="config-key">SIM_PARTIAL_FILL_PROB</span>
+        <span class="config-val-display" x-text="(parseFloat(config.SIM_PARTIAL_FILL_PROB||0)*100).toFixed(0)+'%'"></span>
+      </div>
+      <div class="config-control">
+        <input type="range" x-model="config.SIM_PARTIAL_FILL_PROB" min="0" max="1" step="0.01" style="width:200px" />
+      </div>
+      <div class="config-desc">Probability (0–1) that a simulated buy order fills only partially instead of the full requested size. E.g. <code>0.2</code> = 20% chance your order is only partially filled, simulating real-world thin liquidity or competing orders. <code>0</code> = always fill fully (optimistic).</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">Slippage <span class="config-key">SIM_SLIPPAGE_BPS</span></div>
+      <div class="config-control">
+        <input type="number" x-model="config.SIM_SLIPPAGE_BPS" min="0" max="500" step="1" style="width:100px" />
+        <span class="label">basis points</span>
+      </div>
+      <div class="config-desc">Simulated taker price slippage applied to each fill, in basis points (1 bps = 0.01%). E.g. <code>20</code> = 0.20% worse price than the quoted best ask, mimicking the real cost of walking the order book. Adds friction to entries that makes sim returns more realistic. <code>0</code> = no slippage.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">Latency Jitter <span class="config-key">SIM_LATENCY_JITTER_MS</span></div>
+      <div class="config-control">
+        <input type="number" x-model="config.SIM_LATENCY_JITTER_MS" min="0" max="2000" step="50" style="width:100px" />
+        <span class="label">milliseconds</span>
+      </div>
+      <div class="config-desc">Random latency added to simulated order submissions, in milliseconds. E.g. <code>200</code> = up to 200ms delay before an order is "acknowledged" by the sim client. Models real-world network variance and API round-trip time. Useful for testing time-sensitive entry logic. <code>0</code> = instant execution.</div>
+    </div>
+
+    <div class="config-row">
+      <div class="config-label">
+        Network Failure Rate <span class="config-key">SIM_NETWORK_FAIL_PROB</span>
+        <span class="config-val-display" x-text="(parseFloat(config.SIM_NETWORK_FAIL_PROB||0)*100).toFixed(0)+'%'"></span>
+      </div>
+      <div class="config-control">
+        <input type="range" x-model="config.SIM_NETWORK_FAIL_PROB" min="0" max="0.5" step="0.01" style="width:200px" />
+      </div>
+      <div class="config-desc">Probability (0–1) that a simulated order submission fails entirely, as if the API returned an error or timed out. E.g. <code>0.05</code> = 5% of orders are rejected. Tests whether the engine handles rejections gracefully and retries or skips correctly. <code>0</code> = orders never fail.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:16px">
+    <button class="save-btn" @click="saveConfig()">Save Changes</button>
+    <span class="label">Changes take effect on next engine restart.</span>
+  </div>
+</div>
+
 </main>
+
+<!-- Toast -->
+<div class="toast" :class="[toast.type, toast.visible ? '' : 'hidden']" x-text="toast.msg" x-show="toast.visible" x-transition></div>
 
 <script>
 const PALETTE = ['#58a6ff','#3fb950','#bc8cff','#ffa657','#f85149','#d29922','#79c0ff'];
@@ -488,16 +731,26 @@ function app() {
     lastUpdated: 'never',
     strategies: [],
     live: { session: null, state: null },
-    // true only when the DB session mode is "prod" — drives all SIM/LIVE UI
-    get isLiveMode() { return this.live.session?.mode === 'prod'; },
+    get isLiveMode() { return this.live.session?.mode === 'prod' || this.live.session?.mode === 'live'; },
+    get displayBalance() {
+      const s = this.live.state;
+      if (s?.balance != null) return s.balance;
+      // Fall back: wallet_start from DB session + accumulated session PnL.
+      const start = this.live.session?.wallet_start ?? 50;
+      return start + (s?.sessionPnl ?? 0);
+    },
 
-    // Performance
-    perfPeriod: 'daily',
-    perfStrategy: '',
-    perf: [],
+    // Feed
+    feedLog: [],
+    feedMaxVisible: 20,
+    _lastCompletedSlugs: new Set(),
 
-    // Compare
-    compare: { rows: [], curves: {} },
+    // Engine process statuses — seeded immediately so the grid renders before
+    // the first /api/live response arrives.
+    engines: [
+      'simulation','late-entry','momentum-imbalance',
+      'btc-gap-fade','passive-maker','multi-level-ofi',
+    ].map(s => ({ strategy: s, running: false, pid: null, startedAt: null, exitCode: null })),
 
     // Projections
     projStrategy: '',
@@ -511,14 +764,29 @@ function app() {
     roundOffset: 0,
     selectedRound: null,
 
+    // Live tab embedded perf/compare
+    livePerfPeriod: 'daily',
+    livePerfStrategy: '',
+    livePerf: [],
+    liveCompare: { rows: [], curves: {} },
+
+    // Config
+    config: {},
+
+    // Toast
+    toast: { msg: '', type: 'success', visible: false },
+    _toastTimer: null,
+
     // Chart instances
     _charts: {},
 
     async init() {
-      await this.loadStrategies();
-      await this.loadLive();
+      await Promise.all([this.loadStrategies(), this.loadLive()]);
       this.renderFeeChart();
-      setInterval(() => this.loadLive(), 5000);
+      this.loadLivePerf();
+      this.loadLiveCompare();
+      setInterval(() => this.loadLive(), 3000);
+      setInterval(() => { this.loadLivePerf(); this.loadLiveCompare(); }, 30000);
     },
 
     async loadStrategies() {
@@ -533,31 +801,85 @@ function app() {
       try {
         const r = await fetch('/api/live');
         const d = await r.json();
+        this._diffFeed(d.state?.completedMarkets ?? []);
         this.live = d;
+        this.engines = d.engines ?? [];
         this.lastUpdated = new Date().toLocaleTimeString();
       } catch {}
     },
 
-    async loadPerf() {
+    _outcomeFromPnl(pnl) {
+      if (pnl == null || pnl === 0) return 'no-trade';
+      return pnl > 0 ? 'win' : 'loss';
+    },
+
+    _diffFeed(completedMarkets) {
+      for (const m of completedMarkets) {
+        const key = (m.strategyName ?? '') + '|' + m.slug;
+        if (!this._lastCompletedSlugs.has(key)) {
+          this._lastCompletedSlugs.add(key);
+          this.feedLog.unshift({
+            ts: Date.now(),
+            time: new Date().toLocaleTimeString(),
+            slug: m.slug,
+            outcome: this._outcomeFromPnl(m.pnl),
+            pnl: m.pnl ?? 0,
+            strategyName: m.strategyName ?? '—',
+          });
+          if (this.feedLog.length > 500) this.feedLog.length = 500;
+        }
+      }
+    },
+
+    async loadLivePerf() {
       try {
-        const qs = new URLSearchParams({ period: this.perfPeriod });
-        if (this.perfStrategy) qs.set('strategy', this.perfStrategy);
+        const qs = new URLSearchParams({ period: this.livePerfPeriod });
+        if (this.livePerfStrategy) qs.set('strategy', this.livePerfStrategy);
         const [pRes, eRes] = await Promise.all([
-          fetch('/api/performance?'+qs),
-          fetch('/api/equity-curve?'+(this.perfStrategy ? 'strategy='+encodeURIComponent(this.perfStrategy) : '')),
+          fetch('/api/performance?' + qs),
+          fetch('/api/equity-curve?' + (this.livePerfStrategy ? 'strategy=' + encodeURIComponent(this.livePerfStrategy) : '')),
         ]);
-        this.perf = await pRes.json();
+        this.livePerf = await pRes.json();
         const equity = await eRes.json();
-        this.$nextTick(() => { this.renderEquityChart(equity); this.renderPnlBar(); });
+        this.$nextTick(() => { this.renderLiveEquityChart(equity); this.renderLivePnlBar(); });
       } catch {}
     },
 
-    async loadCompare() {
+    async loadLiveCompare() {
       try {
         const r = await fetch('/api/compare');
-        this.compare = await r.json();
-        this.$nextTick(() => this.renderCompareChart());
+        this.liveCompare = await r.json();
       } catch {}
+    },
+
+    async engineAction(action, strategy) {
+      try {
+        const r = await fetch('/api/engines', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action, strategy }),
+        });
+        const d = await r.json();
+        if (!d.ok) {
+          this._showToast(d.error ?? 'Error', 'error');
+        } else {
+          this._showToast(`${action === 'start' ? 'Started' : 'Stopped'} ${strategy}`, 'success');
+          // Refresh engine statuses immediately.
+          setTimeout(() => this.loadLive(), 400);
+        }
+      } catch (e) {
+        this._showToast('Network error: ' + e, 'error');
+      }
+    },
+
+    async startAllEngines() {
+      const idle = this.engines.filter(e => !e.running);
+      for (const e of idle) await this.engineAction('start', e.strategy);
+    },
+
+    async stopAllEngines() {
+      const running = this.engines.filter(e => e.running);
+      for (const e of running) await this.engineAction('stop', e.strategy);
     },
 
     async loadProjections() {
@@ -581,10 +903,68 @@ function app() {
 
     selectRound(r) { this.selectedRound = r; },
 
+    async loadConfig() {
+      try {
+        const r = await fetch('/api/config');
+        this.config = await r.json();
+      } catch {}
+    },
+
+    async saveConfig() {
+      try {
+        const r = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.config),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this._showToast('Config saved — restart the engine to apply changes.', 'success');
+        } else {
+          this._showToast('Error: ' + (d.error ?? 'Unknown error'), 'error');
+        }
+      } catch (e) {
+        this._showToast('Network error: ' + e, 'error');
+      }
+    },
+
+    _showToast(msg, type) {
+      this.toast = { msg, type, visible: true };
+      if (this._toastTimer) clearTimeout(this._toastTimer);
+      this._toastTimer = setTimeout(() => { this.toast.visible = false; }, 4000);
+    },
+
     // ── Charts ──────────────────────────────────────────────────────────────
 
     _destroyChart(id) {
       if (this._charts[id]) { this._charts[id].destroy(); delete this._charts[id]; }
+    },
+
+    _lineChartOpts(yFmt) {
+      return {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { labels: { color:'#8b949e', font:{size:11} } } },
+        scales: {
+          x: { type:'linear', ticks:{color:'#8b949e', callback: v => new Date(v).toLocaleDateString()}, grid:{color:'#21262d'} },
+          y: { ticks:{color:'#8b949e', callback: yFmt ?? (v=>'$'+v.toFixed(2))}, grid:{color:'#21262d'} }
+        }
+      };
+    },
+
+    _buildEquityDatasets(equity) {
+      const byStrategy = {};
+      for (const pt of equity) {
+        if (!byStrategy[pt.strategy_id]) byStrategy[pt.strategy_id] = [];
+        byStrategy[pt.strategy_id].push(pt);
+      }
+      return Object.entries(byStrategy).map(([id, pts], i) => ({
+        label: id,
+        data: pts.map(p=>({ x: p.created_at, y: p.cumulative })),
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: 'transparent',
+        tension: 0.3,
+        pointRadius: 2,
+      }));
     },
 
     renderFeeChart() {
@@ -612,12 +992,6 @@ function app() {
           plugins: {
             legend: { display: false },
             tooltip: { callbacks: { label: ctx => ctx.parsed.y.toFixed(2)+'%' } },
-            annotation: {
-              annotations: {
-                zoneLow:  { type:'box', xMin:'0.01', xMax:'0.38', backgroundColor:'rgba(63,185,80,.07)', borderWidth:0, label:{content:'Fee-safe',display:true,color:'#3fb950',font:{size:10}} },
-                zoneHigh: { type:'box', xMin:'0.62', xMax:'0.99', backgroundColor:'rgba(63,185,80,.07)', borderWidth:0, label:{content:'Fee-safe',display:true,color:'#3fb950',font:{size:10}} },
-              }
-            }
           },
           scales: {
             x: { ticks:{color:'#8b949e',maxTicksLimit:10}, grid:{color:'#21262d'} },
@@ -627,51 +1001,30 @@ function app() {
       });
     },
 
-    renderEquityChart(equity) {
-      this._destroyChart('equity');
-      const el = document.getElementById('equityChart');
+    renderLiveEquityChart(equity) {
+      this._destroyChart('liveEquity');
+      const el = document.getElementById('liveEquityChart');
       if (!el) return;
-      // Group by strategy_id
-      const byStrategy = {};
-      for (const pt of equity) {
-        if (!byStrategy[pt.strategy_id]) byStrategy[pt.strategy_id] = [];
-        byStrategy[pt.strategy_id].push(pt);
-      }
-      const datasets = Object.entries(byStrategy).map(([id, pts], i) => ({
-        label: id,
-        data: pts.map(p=>({ x: p.created_at, y: p.cumulative })),
-        borderColor: PALETTE[i % PALETTE.length],
-        backgroundColor: 'transparent',
-        tension: 0.3,
-        pointRadius: 2,
-      }));
-      this._charts.equity = new Chart(el, {
+      this._charts.liveEquity = new Chart(el, {
         type: 'line',
-        data: { datasets },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { labels: { color:'#8b949e', font:{size:11} } } },
-          scales: {
-            x: { type:'linear', ticks:{color:'#8b949e', callback: v => new Date(v).toLocaleDateString()}, grid:{color:'#21262d'} },
-            y: { ticks:{color:'#8b949e', callback: v => '$'+v.toFixed(2)}, grid:{color:'#21262d'} }
-          }
-        }
+        data: { datasets: this._buildEquityDatasets(equity) },
+        options: this._lineChartOpts(),
       });
     },
 
-    renderPnlBar() {
-      this._destroyChart('pnlBar');
-      const el = document.getElementById('pnlBarChart');
-      if (!el || !this.perf.length) return;
-      this._charts.pnlBar = new Chart(el, {
+    renderLivePnlBar() {
+      this._destroyChart('livePnlBar');
+      const el = document.getElementById('livePnlBarChart');
+      if (!el || !this.livePerf.length) return;
+      this._charts.livePnlBar = new Chart(el, {
         type: 'bar',
         data: {
-          labels: this.perf.map(p=>p.period),
+          labels: this.livePerf.map(p=>p.period),
           datasets: [{
             label: 'Net PnL',
-            data: this.perf.map(p=>p.total_net_pnl),
-            backgroundColor: this.perf.map(p=>(p.total_net_pnl??0)>=0?'rgba(63,185,80,.6)':'rgba(248,81,73,.6)'),
-            borderColor: this.perf.map(p=>(p.total_net_pnl??0)>=0?'#3fb950':'#f85149'),
+            data: this.livePerf.map(p=>p.total_net_pnl),
+            backgroundColor: this.livePerf.map(p=>(p.total_net_pnl??0)>=0?'rgba(63,185,80,.6)':'rgba(248,81,73,.6)'),
+            borderColor: this.livePerf.map(p=>(p.total_net_pnl??0)>=0?'#3fb950':'#f85149'),
             borderWidth: 1,
           }]
         },
@@ -680,33 +1033,6 @@ function app() {
           plugins: { legend: { display: false } },
           scales: {
             x: { ticks:{color:'#8b949e'}, grid:{color:'#21262d'} },
-            y: { ticks:{color:'#8b949e', callback: v=>'$'+v.toFixed(2)}, grid:{color:'#21262d'} }
-          }
-        }
-      });
-    },
-
-    renderCompareChart() {
-      this._destroyChart('compare');
-      const el = document.getElementById('compareChart');
-      if (!el) return;
-      const curves = this.compare.curves ?? {};
-      const datasets = Object.entries(curves).map(([id, pts], i) => ({
-        label: id,
-        data: pts.map(p=>({ x: p.created_at, y: p.cumulative })),
-        borderColor: PALETTE[i % PALETTE.length],
-        backgroundColor: 'transparent',
-        tension: 0.3,
-        pointRadius: 1,
-      }));
-      this._charts.compare = new Chart(el, {
-        type: 'line',
-        data: { datasets },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { labels: { color:'#8b949e', font:{size:11} } } },
-          scales: {
-            x: { type:'linear', ticks:{color:'#8b949e', callback: v => new Date(v).toLocaleDateString()}, grid:{color:'#21262d'} },
             y: { ticks:{color:'#8b949e', callback: v=>'$'+v.toFixed(2)}, grid:{color:'#21262d'} }
           }
         }
@@ -769,8 +1095,7 @@ function app() {
           },
           scales: {
             x: { ticks:{color:'#8b949e', maxTicksLimit:10}, grid:{color:'#21262d'} },
-            y: { ticks:{color:'#8b949e', callback:v=>v.toFixed(1)+'%'}, grid:{color:'#21262d'},
-                 suggestedMax:4 }
+            y: { ticks:{color:'#8b949e', callback:v=>v.toFixed(1)+'%'}, grid:{color:'#21262d'}, suggestedMax:4 }
           }
         }
       });

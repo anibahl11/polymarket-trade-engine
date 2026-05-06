@@ -1,12 +1,12 @@
 # Indicators
 
-All indicators update on a **fixed 1-second interval** regardless of how fast the loop runs or whether BTC price changed. This means period=14 always means "last 14 seconds."
+All indicators update on a **fixed 1-second interval** regardless of how fast the loop runs or whether the asset price changed. This means period=14 always means "last 14 seconds."
 
 ---
 
 ## RSI (Relative Strength Index) on Gap
 
-**File:** `engine/strategy/late-entry.ts` (inlined)
+**Used in:** `engine/strategy/late-entry.ts`, `engine/strategy/btc-gap-fade.ts`
 
 ### What it measures
 
@@ -53,7 +53,7 @@ RSI is **direction-aware** — the same value means different things depending o
 | < 30 (DOWN trend) | Red — RSI opposes UP, gap shrinking | Green — RSI confirms DOWN, gap expanding downward |
 | 30–70 (neutral) | Yellow — no clear trend, oscillating | Yellow — no clear trend, oscillating |
 
-### Use in stop-loss suppression
+### Use in stop-loss suppression (late-entry)
 
 RSI is used as a second layer of confirmation alongside the instantaneous gap check:
 
@@ -66,15 +66,19 @@ Stop-loss windows:
 - **remaining 80–20s**: suppress if gap confirms OR RSI confirms momentum
 - **remaining < 20s**: suppress on gap confirmation only (not enough time for RSI to matter)
 
+### Use as volatility quality gate (btc-gap-fade)
+
+In `btc-gap-fade`, RSI is applied to the gap itself (not the price) to track whether momentum is truly shifting. It does not gate entry directly — ATR and PGR do — but it is updated each tick and contributes to the `Indicators` state tracked throughout the slot.
+
 ### When you see reversal (RSI < 30)
 
-Reversal only appears when a previously large gap has been **consistently shrinking** over 14 seconds. A brief oval dip that recovers won't move RSI much. You need sustained gap contraction to reach < 30 — which is exactly the signal that a position is genuinely reversing.
+Reversal only appears when a previously large gap has been **consistently shrinking** over 14 seconds. A brief dip that recovers won't move RSI much. You need sustained gap contraction to reach < 30 — which is exactly the signal that a position is genuinely reversing.
 
 ---
 
 ## ATR (Average True Range)
 
-**File:** `engine/strategy/late-entry.ts` (inlined)
+**Used in:** `engine/strategy/late-entry.ts`, `engine/strategy/btc-gap-fade.ts`
 
 ### What it measures
 
@@ -100,7 +104,7 @@ ATR  = (prev_ATR × 13 + TR) / 14           // Wilder's smoothing
 | $15–30 | High volatility — BTC making large moves per second |
 | > $30 | Very high volatility — significant market event |
 
-### Safety ratio
+### Safety ratio (late-entry)
 
 The display shows `Safety: Nx` which is:
 
@@ -115,24 +119,17 @@ This answers: *how many average BTC moves would it take to close the gap?*
 | > 10x | Very safe — gap is large relative to current volatility |
 | 3–10x | Moderate — gap could close with sustained movement |
 | 1–3x | Risky — a few large ticks could flip the outcome |
-| < 1x | Dangerous — gap is within normal noise range, outcome uncertain |
+| < 1x | Dangerous — gap is within normal noise range |
 
-### Combined with time remaining
+### Use as minimum gate (btc-gap-fade)
 
-Safety alone is incomplete — it must be read alongside remaining time:
-
-| Safety | Time left | Assessment |
-|---|---|---|
-| 2x | 250s | Risky — plenty of time for BTC to close the gap |
-| 2x | 10s | Fine — not enough time for 2 average moves |
-| 10x | 250s | Safe — BTC would need 10 sustained moves against you |
-| 10x | 10s | Very safe — essentially guaranteed |
+In `btc-gap-fade`, ATR must exceed `BGF_MIN_ATR` (default: 3) to enter. This blocks entries during dead periods when BTC is barely moving and the gap might be a statistical artefact rather than a real directional signal. Low ATR means reversion could stall rather than complete.
 
 ---
 
 ## RTV (Rolling Tick Volatility)
 
-**File:** `engine/strategy/late-entry.ts` (inlined)
+**Used in:** `engine/strategy/late-entry.ts`
 
 ### What it measures
 
@@ -169,7 +166,7 @@ Both ATR and RTV measure BTC volatility per second, but:
 
 ## PGR (Peak Gap Ratio)
 
-**File:** `engine/strategy/late-entry.ts` (inlined)
+**Used in:** `engine/strategy/late-entry.ts`, `engine/strategy/btc-gap-fade.ts`
 
 ### What it measures
 
@@ -184,31 +181,125 @@ peakAbsGap = max(peakAbsGap, |gap|)
 PGR        = |currentGap| / peakAbsGap
 ```
 
-Reset to 0 between slots via `reset()`.
+Reset to 0 between slots.
 
 ### Interpretation
 
 | PGR | Meaning |
 |---|---|
-| 0.90–1.00 | Fresh/strong — gap near its peak, move has full conviction |
-| 0.75–0.90 | Normal fluctuation — some fade, still acceptable for entry |
-| < 0.75 | Momentum exhaustion — gap has lost 25%+ from peak, entry blocked |
+| 0.90–1.00 | Fresh/strong — gap near its peak |
+| 0.75–0.90 | Normal fluctuation — some fade, still acceptable |
+| < 0.75 | Momentum exhaustion — gap has lost 25%+ from peak |
 
-### Why it matters
+### Use in entry gating (late-entry)
 
-A gap of $84 with gapSafety of 91x looks safe in isolation. But if the peak gap was $126, that $84 represents a 33% fade — the move is exhausting. Markets that fade this much often continue declining into a full reversal.
-
-**Real example:** BTC rallied $126 above priceToBeat by x=135, then slowly bled to $84 by x=210 (PGR=0.67). Case 4 triggered because ATR was low and gapSafety was high. But the fading gap signaled the move was dying — BTC then crashed $80 in the final seconds, triggering stop-loss. PGR < 0.75 would have blocked the entry.
-
-### Use in entry gating
-
-PGR is used as a pre-entry filter in the entry monitor. Case 4 requires:
+Case 4 requires:
 
 ```
 peakGapRatio >= 0.75
 ```
 
-If PGR is below 0.75, entry is blocked — the gap has faded too much from its peak, regardless of how safe the instantaneous indicators look.
+If PGR is below 0.75, entry is blocked regardless of how safe the instantaneous indicators look.
+
+### Use as fade confirmation (btc-gap-fade)
+
+In `btc-gap-fade`, PGR is used inversely — the strategy *wants* the gap to have faded significantly. Entry requires:
+
+```
+pgr < BGF_FADE_RATIO   (default: 0.70)
+```
+
+This means the gap must have faded to less than 70% of its peak before entry. A higher `BGF_FADE_RATIO` allows entry earlier in the fade; a lower value waits for a more complete reversion.
+
+**Why this matters:** A gap of $84 with a peak of $126 (PGR ≈ 0.67) is in meaningful reversion territory. Markets that have faded this much tend to continue declining into a full reversal, making the losing side a favorable buy.
+
+---
+
+## OFI (Order Flow Imbalance)
+
+**Used in:** `engine/strategy/multi-level-ofi.ts`
+
+### What it measures
+
+OFI measures the balance between buy pressure (bids) and sell pressure (asks) at multiple levels of the order book. It answers: *is the market currently being pushed higher (buy pressure) or lower (sell pressure)?*
+
+A positive OFI indicates bid pressure dominating — the UP side is favoured. A negative OFI indicates ask pressure — the DOWN side is favoured.
+
+### How it works (multi-level weighted)
+
+The top 3 price levels of the order book are used, with exponentially decaying weights:
+
+```
+weights = [1.0, 0.7, 0.4]
+
+OFI = Σ (bidQty[i] - askQty[i]) × weights[i]    for i = 0, 1, 2
+```
+
+Where `bidQty[i]` and `askQty[i]` are the quantities at the i-th level from the top of the book.
+
+### Signal construction
+
+OFI is computed for both the UP and DOWN sides independently:
+
+```
+ofiUp   = OFI(UP book)
+ofiDown = OFI(DOWN book)
+
+Signal UP:   ofiUp > threshold AND ofiUp > -ofiDown
+Signal DOWN: -ofiDown > threshold AND -ofiDown > ofiUp
+```
+
+Both conditions must hold to qualify as a signal. This filters out weak or ambiguous imbalances.
+
+### Interpretation
+
+| OFI | Meaning |
+|---|---|
+| Large positive | Strong bid pressure — buyers dominating, price likely to move up |
+| Near zero | Balanced — no clear directional pressure |
+| Large negative | Strong ask pressure — sellers dominating, price likely to move down |
+
+### Academic basis
+
+Multi-level OFI is derived from research by Cont et al. which found approximately 63% directional accuracy when OFI is used as a short-term price impact predictor. The weighted multi-level version outperforms single-level OFI because it captures the depth of the imbalance, not just the top of the book.
+
+### Dislocation gate (multi-level-ofi strategy)
+
+OFI alone is not sufficient for entry. The strategy also requires a BTC dislocation: BTC must have moved meaningfully (> `MLOFI_DISLOC_BTC_PCT`, default 0.02%) in the last 30 seconds in the same direction as the OFI signal, AND the token price must not yet reflect that move.
+
+```
+fairValue ≈ 0.5 + (gap / openPrice) × 5   // linear approximation
+dislocation = |askPrice - fairValue| > MLOFI_DISLOC_TOKEN_GAP
+```
+
+This combination — OFI confirming direction + BTC moving + token lagging — identifies the specific moment when a systematic mispricing is both real and about to correct.
+
+---
+
+## PriceWindow (30-second sliding price window)
+
+**Used in:** `engine/strategy/multi-level-ofi.ts`
+
+### What it measures
+
+PriceWindow maintains a sliding window of recent BTC price samples over the last N milliseconds. It answers: *how much has BTC moved in the last 30 seconds?*
+
+### How it works
+
+```
+push(ts, price):
+  append {ts, price} to samples
+  drop all samples where ts < (now - windowMs)
+
+oldest() → samples[0].price
+latest() → samples[last].price
+
+pctMove = |latest - oldest| / oldest
+```
+
+### Use in dislocation detection
+
+In `multi-level-ofi`, a 30-second window (`windowMs = 30_000`) is used to compute BTC's recent percentage move. This is compared against `MLOFI_DISLOC_BTC_PCT` to qualify whether a real move has occurred that the token market hasn't yet priced in.
 
 ---
 

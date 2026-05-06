@@ -266,7 +266,7 @@ export class DbReader {
     from?: number;
     to?: number;
   } = {}): EquityPoint[] {
-    const conditions: string[] = ["r.outcome IS NOT NULL", "r.net_pnl IS NOT NULL"];
+    const conditions: string[] = ["r.outcome IN ('win', 'loss', 'no-data')", "r.net_pnl IS NOT NULL"];
     const params: Record<string, unknown> = {};
 
     if (opts.strategy) {
@@ -328,9 +328,9 @@ export class DbReader {
       "3y":    "%Y-%m",
     };
     const lookbackDays: Record<Period, number | null> = {
-      daily:   1,
-      weekly:  7,
-      monthly: 30,
+      daily:   null,  // show all days
+      weekly:  null,  // show all weeks
+      monthly: null,  // show all months
       "3m":    90,
       "6m":    180,
       "1y":    365,
@@ -486,6 +486,24 @@ export class DbReader {
       avg_loss:  stats?.avg_loss ?? 0,
       outcomes,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // wallet start for projections
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns the wallet_start of the earliest session for a given strategy.
+   * Used as the baseline balance for CAGR projections.
+   */
+  getWalletStartForStrategy(strategyId: string): number | null {
+    const row = this._db.query<{ wallet_start: number | null }, [string]>(`
+      SELECT wallet_start FROM sessions
+      WHERE strategy_id = ? AND wallet_start IS NOT NULL
+      ORDER BY started_at ASC
+      LIMIT 1
+    `).get(strategyId);
+    return row?.wallet_start ?? null;
   }
 
   // ---------------------------------------------------------------------------

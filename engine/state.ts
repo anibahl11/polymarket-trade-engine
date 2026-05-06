@@ -28,6 +28,7 @@ export type DailyLossState = {
 export type PersistentState = {
   sessionPnl: number;
   sessionLoss?: number;
+  balance?: number;
   daily?: DailyLossState;
   activeMarkets: MarketState[];
   completedMarkets: CompletedMarketState[];
