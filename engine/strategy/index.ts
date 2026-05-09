@@ -34,7 +34,7 @@ import type { Strategy } from "./types.ts";
 import type { ParamsSchema } from "./strategy-meta.ts";
 
 import { simulationStrategy } from "./simulation.ts";
-import { lateEntry } from "./late-entry.ts";
+import { lateEntry,      VERSION as LE_VERSION,   PARAMS_SCHEMA as LE_PARAMS    } from "./late-entry.ts";
 import { momentumImbalance } from "./momentum-imbalance.ts";
 import { btcGapFade,    VERSION as BGF_VERSION,   PARAMS_SCHEMA as BGF_PARAMS   } from "./btc-gap-fade.ts";
 import { passiveMaker,  VERSION as PM_VERSION,    PARAMS_SCHEMA as PM_PARAMS    } from "./passive-maker.ts";
@@ -63,7 +63,7 @@ export const strategies: Record<string, Strategy> = {
 // -----------------------------------------------------------------------------
 export const strategyVersions: Record<string, string> = {
   "simulation":         "1.0.0",
-  "late-entry":         "1.0.0",
+  "late-entry":         LE_VERSION,
   "momentum-imbalance": "1.0.0",
   "btc-gap-fade":       BGF_VERSION,
   "passive-maker":      PM_VERSION,
@@ -79,7 +79,7 @@ export const strategyVersions: Record<string, string> = {
 // -----------------------------------------------------------------------------
 export const strategyParamsSchemas: Record<string, ParamsSchema | null> = {
   "simulation":         null,
-  "late-entry":         null,
+  "late-entry":         LE_PARAMS,
   "momentum-imbalance": null,
   "btc-gap-fade":       BGF_PARAMS,
   "passive-maker":      PM_PARAMS,

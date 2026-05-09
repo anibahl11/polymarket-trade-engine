@@ -45,9 +45,15 @@ export function loadState(path: string): PersistentState | null {
   }
 }
 
+const MAX_COMPLETED_MARKETS = 20;
+
 export function saveState(path: string, state: PersistentState): void {
+  const capped: PersistentState = {
+    ...state,
+    completedMarkets: state.completedMarkets.slice(-MAX_COMPLETED_MARKETS),
+  };
   const tmp = path + ".tmp";
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(tmp, JSON.stringify(state, null, 2), "utf8");
+  writeFileSync(tmp, JSON.stringify(capped, null, 2), "utf8");
   renameSync(tmp, path);
 }

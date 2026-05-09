@@ -298,16 +298,30 @@ function handleEquityCurve(url: URL): Response {
 function handleLive(): Response {
   const session = withReader((r) => r.getLiveSession(), null);
 
-  // Collect the set of distinct state file paths that actually exist.
-  // We track which files we've already read to avoid double-counting when
-  // multiple strategies fall back to the same legacy path.
+  type PartialState = {
+    sessionPnl?: number;
+    balance?: number | null;
+    activeMarkets?: unknown[];
+    completedMarkets?: unknown[];
+  };
+
+  type StrategyState = {
+    strategy: string;
+    sessionPnl: number;
+    balance: number | null;
+  };
+
+  const stateJson: {
+    sessionPnl: number;
+    balance: number | null;
+    activeMarkets: unknown[];
+    completedMarkets: unknown[];
+    strategyStates: StrategyState[];
+  } = { sessionPnl: 0, balance: null, activeMarkets: [], completedMarkets: [], strategyStates: [] };
+
   const seenPaths = new Set<string>();
-  type PartialState = { sessionPnl?: number; balance?: number | null; activeMarkets?: unknown[]; completedMarkets?: unknown[] };
-  const stateJson: { sessionPnl: number; balance: number | null; activeMarkets: unknown[]; completedMarkets: unknown[] } =
-    { sessionPnl: 0, balance: null, activeMarkets: [], completedMarkets: [] };
 
   for (const strategy of ALL_STRATEGIES) {
-    // Per-strategy path first; legacy single-strategy path as fallback.
     const candidates = [
       `state/early-bird-${strategy}.json`,
       "state/early-bird.json",
@@ -317,15 +331,15 @@ function handleLive(): Response {
       seenPaths.add(p);
       try {
         const s = JSON.parse(readFileSync(p, "utf-8")) as PartialState;
-        stateJson.sessionPnl += s.sessionPnl ?? 0;
-        // Only add balance when it's a real number (older state files omit it).
-        if (typeof s.balance === "number") {
-          stateJson.balance = (stateJson.balance ?? 0) + s.balance;
-        }
+        const pnl = s.sessionPnl ?? 0;
+        const bal = typeof s.balance === "number" ? s.balance : null;
+        stateJson.sessionPnl += pnl;
+        if (bal !== null) stateJson.balance = (stateJson.balance ?? 0) + bal;
         stateJson.activeMarkets.push(...(s.activeMarkets ?? []));
         stateJson.completedMarkets.push(...(s.completedMarkets ?? []));
+        stateJson.strategyStates.push({ strategy, sessionPnl: pnl, balance: bal });
       } catch {}
-      break; // found a file for this strategy — don't try the legacy path too
+      break;
     }
   }
 

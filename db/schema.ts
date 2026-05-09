@@ -88,6 +88,9 @@ export function openDatabase(opts: { readonly?: boolean } = {}): Database {
     // from the NDJSON logs). Rounds are written at market close, not on every
     // tick, so this is safe.
     db.exec("PRAGMA synchronous=NORMAL;");
+    // Allow up to 5 seconds of retrying when another writer holds the lock.
+    // Critical when 5 strategies write simultaneously at slot boundaries.
+    db.exec("PRAGMA busy_timeout=5000;");
   }
 
   runMigrations(db);

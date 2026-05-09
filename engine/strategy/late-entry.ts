@@ -1,7 +1,32 @@
-// Buy and Hold strategy
-
 import type { Strategy, StrategyContext } from "./types.ts";
 import { Env } from "../../utils/config.ts";
+import type { ParamsSchema } from "./strategy-meta.ts";
+
+export const VERSION = "1.0.0";
+
+export const PARAMS_SCHEMA: ParamsSchema = {
+  LE_REMAINING_MAX_S:   { default: 120,  description: "Don't enter with more than this many seconds remaining" },
+  LE_ATR_MAX:           { default: 5.0,  description: "Max ATR (BTC vol/s) to allow entry" },
+  LE_GAP_SAFETY_MIN:    { default: 10,   description: "Min gap-to-ATR safety ratio for entry" },
+  LE_PEAK_GAP_RATIO_MIN:{ default: 0.50, description: "Min PGR (current/peak gap) to allow entry" },
+  LE_CERTAINTY_MIN:     { default: 0.60, description: "Min token ask price to count as high-certainty" },
+};
+
+function readConfig() {
+  const f = (key: string, def: number) => {
+    const raw = process.env[key];
+    if (raw === undefined) return def;
+    const n = parseFloat(raw);
+    return isNaN(n) ? def : n;
+  };
+  return {
+    remainingMaxS:    f("LE_REMAINING_MAX_S",    120),
+    atrMax:           f("LE_ATR_MAX",            5.0),
+    gapSafetyMin:     f("LE_GAP_SAFETY_MIN",     10),
+    peakGapRatioMin:  f("LE_PEAK_GAP_RATIO_MIN", 0.50),
+    certaintyMin:     f("LE_CERTAINTY_MIN",       0.60),
+  };
+}
 
 class RSI {
   private _period: number;
@@ -227,6 +252,7 @@ function checkEntry(params: {
   gapSafety: number | null;
   divergence: number | null;
   peakGapRatio: number | null;
+  cfg: ReturnType<typeof readConfig>;
 }): EntrySignal | null {
   const {
     remaining,
@@ -237,6 +263,7 @@ function checkEntry(params: {
     atr,
     gapSafety,
     peakGapRatio,
+    cfg,
   } = params;
 
   if (remaining < 5) return null;
@@ -246,17 +273,17 @@ function checkEntry(params: {
   const divergence = params.divergence ?? Infinity;
 
   if (
-    remaining <= 90 &&
+    remaining <= cfg.remainingMaxS &&
     atr &&
-    atr <= 2 &&
+    atr <= cfg.atrMax &&
     gapSafety &&
-    gapSafety >= 40 &&
+    gapSafety >= cfg.gapSafetyMin &&
     divergence <= 10 &&
     peakGapRatio &&
-    peakGapRatio >= 0.75
+    peakGapRatio >= cfg.peakGapRatioMin
   ) {
-    const upCertain = up != null && up.price > 0.85;
-    const downCertain = down != null && down.price > 0.85;
+    const upCertain = up != null && up.price > cfg.certaintyMin;
+    const downCertain = down != null && down.price > cfg.certaintyMin;
 
     if (upCertain || downCertain) {
       const side: "UP" | "DOWN" = upCertain ? "UP" : "DOWN";
@@ -406,31 +433,19 @@ function checkStopLoss(
 // ---------------------------------------------------------------------------
 
 export const lateEntry: Strategy = async (ctx) => {
-  // ── Prod guard ────────────────────────────────────────────────────────────
-  // This strategy is specially designed for simulation only. If you still
-  // want to run it in production, remove this guard and make the necessary
-  // changes to the strategy logic as per your needs.
   if (Env.get("PROD")) {
-    ctx.log(
-      "[late-entry] This strategy is specially designed for simulation only. " +
-        "If you still want to run it in production, remove this guard and make " +
-        "the necessary changes to the strategy logic as per your needs.",
-      "red",
-    );
+    ctx.log("[late-entry] Simulation only — refusing to run with PROD=true.", "red");
     process.exit(1);
   }
 
-  // ── ctx.hold() ────────────────────────────────────────────────────────────
-  // By default, the engine transitions out of RUNNING as soon as the strategy
-  // function returns. Since this strategy is event-driven (it reacts to price
-  // ticks over the life of the market), we need to keep the lifecycle in
-  // RUNNING until we are truly done.
-  //
-  // ctx.hold() increments an internal counter and returns a release function.
-  // The lifecycle will not exit RUNNING until every active hold has been
-  // released. Call release() exactly once when your strategy has no more work
-  // to do (position closed, stop-loss fired, or time ran out). Forgetting to
-  // call it will cause the engine to hang after the market closes.
+  const cfg = readConfig();
+
+  ctx.log(
+    `[${ctx.slug}] late-entry: remainingMax=${cfg.remainingMaxS}s atrMax=${cfg.atrMax} ` +
+    `safetyMin=${cfg.gapSafetyMin} pgrMin=${cfg.peakGapRatioMin} certaintyMin=${cfg.certaintyMin}`,
+    "cyan",
+  );
+
   const releaseLock = ctx.hold();
 
   const state: LateEntryState = {
@@ -479,6 +494,7 @@ export const lateEntry: Strategy = async (ctx) => {
           gapSafety: gap !== null ? indicators.gapSafety(gap) : null,
           divergence: ctx.ticker.divergence,
           peakGapRatio: gap !== null ? indicators.peakGapRatio(gap) : null,
+          cfg,
         });
 
         if (signal) {

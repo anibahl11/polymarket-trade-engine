@@ -181,28 +181,49 @@
   </div>
 
   <!-- Stat cards -->
-  <div class="grid grid-4" style="margin-bottom:16px">
+  <div class="grid grid-3" style="margin-bottom:16px">
     <div class="card">
       <h3>Combined Session PnL</h3>
       <div class="stat" :class="(live.state?.sessionPnl??0)>=0?'green':'red'"
            x-text="fmt(live.state?.sessionPnl??0, true)"></div>
-      <div class="sub" x-text="(live.state?.activeMarkets?.length??0)+' active markets across all strategies'"></div>
+      <div class="sub" x-text="(live.state?.activeMarkets?.length??0)+' active market slots across all strategies'"></div>
     </div>
     <div class="card">
       <h3>Strategies Running</h3>
       <div class="stat blue" x-text="engines.filter(e=>e.running).length + ' / ' + engines.length"></div>
       <div class="sub" x-text="(live.state?.activeMarkets?.length??0) + ' active market slots'"></div>
     </div>
-    <div class="card" style="border-color:var(--yellow)">
-      <h3>Simulated Balance</h3>
-      <div class="stat yellow" x-text="fmt(displayBalance)"></div>
-      <div class="sub" x-text="'Session PnL: ' + fmt(live.state?.sessionPnl ?? 0, true)"></div>
-    </div>
     <div class="card">
       <h3>Total Rounds (DB)</h3>
       <div class="stat blue" x-text="strategies.reduce((s,r)=>s+(r.total_rounds??0),0)"></div>
       <div class="sub" x-text="strategies.length+' strategies tracked'"></div>
     </div>
+  </div>
+
+  <!-- Per-strategy balance table -->
+  <div class="card" style="margin-bottom:16px">
+    <h3>Strategy Balances</h3>
+    <template x-if="!(live.state?.strategyStates?.filter(s=>s.balance!=null).length)">
+      <div class="no-data-msg" style="padding:16px">No strategy state files found — start the engines first.</div>
+    </template>
+    <template x-if="live.state?.strategyStates?.filter(s=>s.balance!=null).length">
+      <table>
+        <thead><tr>
+          <th>Strategy</th>
+          <th>Balance</th>
+          <th>Session PnL</th>
+        </tr></thead>
+        <tbody>
+          <template x-for="s in (live.state?.strategyStates??[]).filter(s=>s.balance!=null)" :key="s.strategy">
+            <tr>
+              <td style="font-weight:600;color:var(--blue)" x-text="s.strategy"></td>
+              <td x-text="fmt(s.balance)"></td>
+              <td :class="s.sessionPnl>=0?'green':'red'" x-text="fmt(s.sessionPnl, true)"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </template>
   </div>
 
   <!-- Active / Completed markets -->
@@ -732,13 +753,6 @@ function app() {
     strategies: [],
     live: { session: null, state: null },
     get isLiveMode() { return this.live.session?.mode === 'prod' || this.live.session?.mode === 'live'; },
-    get displayBalance() {
-      const s = this.live.state;
-      if (s?.balance != null) return s.balance;
-      // Fall back: wallet_start from DB session + accumulated session PnL.
-      const start = this.live.session?.wallet_start ?? 50;
-      return start + (s?.sessionPnl ?? 0);
-    },
 
     // Feed
     feedLog: [],
@@ -815,7 +829,9 @@ function app() {
 
     _diffFeed(completedMarkets) {
       for (const m of completedMarkets) {
-        const key = (m.strategyName ?? '') + '|' + m.slug;
+        // Include pnl in the key so a re-run of the same slug with a different
+        // outcome (e.g. new session) creates a new feed entry.
+        const key = (m.strategyName ?? '') + '|' + m.slug + '|' + (m.pnl ?? 'null');
         if (!this._lastCompletedSlugs.has(key)) {
           this._lastCompletedSlugs.add(key);
           this.feedLog.unshift({
