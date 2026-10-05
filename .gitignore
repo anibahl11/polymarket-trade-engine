@@ -29,13 +29,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # IntelliJ based IDEs
 .idea
-loss/*.html
 
 # Finder (MacOS) folder config
 .DS_Store
 
 # strategy state
 state/
-test.ts
 
-__tmp_state__

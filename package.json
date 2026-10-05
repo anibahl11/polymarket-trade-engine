@@ -1,18 +1,18 @@
 {
-  "name": "early-bird-engine",
-  "module": "index.ts",
+  "name": "mention-engine",
+  "module": "src/cli.ts",
   "type": "module",
+  "private": true,
   "scripts": {
     "check": "tsc -b --noEmit",
-    "start": "bun index.ts",
-    "dashboard": "bun dashboard/server.ts",
-    "start:all": "bun dashboard/server.ts & bun index.ts"
+    "test": "bun test",
+    "scan": "bun src/cli.ts scan",
+    "backfill": "bun src/cli.ts backfill",
+    "calibrate": "bun src/cli.ts calibrate"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/sinon": "^21.0.1",
-    "prettier": "^3.8.1",
-    "sinon": "^21.1.2"
+    "prettier": "^3.8.1"
   },
   "peerDependencies": {
     "typescript": "^5"
